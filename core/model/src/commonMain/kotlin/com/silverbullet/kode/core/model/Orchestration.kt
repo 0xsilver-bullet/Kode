@@ -311,6 +311,14 @@ data class OrchestrationThreadShell(
     val createdAt: String,
     val updatedAt: String,
     val archivedAt: String? = null,
+    /**
+     * The user's explicit pin: `"settled"` files the thread away, `"active"`
+     * keeps it out of the settled shelf regardless of age. Absent on servers
+     * predating the `threadSettlement` capability, which just means no pin.
+     */
+    val settledOverride: String? = null,
+    /** When the server accepted a settle. Used to adjudicate races. */
+    val settledAt: String? = null,
     val session: OrchestrationSession? = null,
     val latestUserMessageAt: String? = null,
     val hasPendingApprovals: Boolean = false,

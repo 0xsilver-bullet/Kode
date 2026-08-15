@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,10 +26,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.silverbullet.kode.core.designsystem.KodeIcons
+import com.silverbullet.kode.core.designsystem.KodeTheme
 import com.silverbullet.kode.core.model.ThreadId
+import com.silverbullet.kode.feature.threads.presentation.ThreadListItem
 import com.silverbullet.kode.feature.threads.presentation.ThreadListUiState
 import com.silverbullet.kode.feature.threads.presentation.ThreadListViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadRow
@@ -41,13 +46,19 @@ fun ThreadListRoute(
     viewModel: ThreadListViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    ThreadListScreen(uiState = uiState, onOpenThread = onOpenThread, modifier = modifier)
+    ThreadListScreen(
+        uiState = uiState,
+        onOpenThread = onOpenThread,
+        onToggleSettledShelf = viewModel::toggleSettledShelf,
+        modifier = modifier,
+    )
 }
 
 @Composable
 fun ThreadListScreen(
     uiState: ThreadListUiState,
     onOpenThread: (ThreadId) -> Unit,
+    onToggleSettledShelf: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -66,7 +77,7 @@ fun ThreadListScreen(
         when {
             uiState.isLoading -> CenteredMessage { CircularProgressIndicator() }
 
-            uiState.rows.isEmpty() -> CenteredMessage {
+            uiState.isEmpty -> CenteredMessage {
                 Text(
                     "No threads yet. Start one from the desktop app.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -80,12 +91,30 @@ fun ThreadListScreen(
                 contentPadding = WindowInsets.navigationBars.asPaddingValues(),
             ) {
                 items(
-                    items = uiState.rows,
-                    key = { it.thread.id.value },
-                    contentType = { "thread" },
-                ) { row ->
-                    ThreadListItem(row = row, onClick = { onOpenThread(row.thread.id) })
-                    HorizontalDivider()
+                    items = uiState.items,
+                    key = { it.key },
+                    contentType = { entry ->
+                        when (entry) {
+                            is ThreadListItem.Thread -> "thread"
+                            is ThreadListItem.SettledShelf -> "settled-shelf"
+                        }
+                    },
+                ) { entry ->
+                    when (entry) {
+                        is ThreadListItem.Thread -> {
+                            ThreadRowItem(
+                                row = entry.row,
+                                onClick = { onOpenThread(entry.row.thread.id) },
+                            )
+                            HorizontalDivider()
+                        }
+
+                        is ThreadListItem.SettledShelf -> SettledShelfHeader(
+                            count = entry.count,
+                            expanded = entry.expanded,
+                            onClick = onToggleSettledShelf,
+                        )
+                    }
                 }
             }
         }
@@ -93,7 +122,7 @@ fun ThreadListScreen(
 }
 
 @Composable
-private fun ThreadListItem(row: ThreadRow, onClick: () -> Unit) {
+private fun ThreadRowItem(row: ThreadRow, onClick: () -> Unit) {
     val thread = row.thread
 
     Row(
@@ -126,6 +155,45 @@ private fun ThreadListItem(row: ThreadRow, onClick: () -> Unit) {
             else -> Unit
         }
     }
+}
+
+/**
+ * Divides the inbox from finished work.
+ *
+ * Collapsed by default: settled threads are history, and the point of the shelf
+ * is that they stop competing for attention with threads that still want it.
+ */
+@Composable
+private fun SettledShelfHeader(count: Int, expanded: Boolean, onClick: () -> Unit) {
+    val colors = KodeTheme.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = KodeIcons.ChevronDown,
+            contentDescription = if (expanded) "Hide settled threads" else "Show settled threads",
+            tint = colors.muted,
+            modifier = Modifier
+                .size(16.dp)
+                .graphicsLayer { rotationZ = if (expanded) 180f else 0f },
+        )
+        Text(
+            text = "Settled",
+            style = MaterialTheme.typography.titleSmall,
+            color = colors.muted,
+        )
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.muted,
+        )
+    }
+    HorizontalDivider(color = colors.divider)
 }
 
 /** Marks a thread waiting on an approval or user input. */

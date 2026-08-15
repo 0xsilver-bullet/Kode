@@ -74,7 +74,8 @@ the exchanged token is.
 Pair with a running T3 Code server, browse its threads, watch a turn stream in live, and reply.
 
 - `server.getConfig` gates the connection: an open socket alone is not "connected".
-- `orchestration.subscribeShell` drives the thread list.
+- `orchestration.subscribeShell` drives the thread list, which separates finished work behind a
+  collapsed **Settled** shelf using the same `effectiveSettled` rules as T3 Code.
 - `orchestration.subscribeThread` drives the timeline. Streaming assistant text arrives as
   `thread.message-sent` events carrying the **full accumulated text**, so the reducer upserts by
   message id rather than appending.

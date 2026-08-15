@@ -152,6 +152,23 @@ stop.
 `ProviderApprovalDecision.cancel` still is not surfaced; it cancels a turn from an approval prompt
 and would belong here rather than on the approval card.
 
+### Settled threads — separated, but not actionable
+The thread list partitions on `effectiveSettled` (ported to `ThreadSettlement.kt`) and puts settled
+threads behind a collapsed **Settled** shelf with a count. Auto-settle is 3 days, matching
+`threadListV2.ts`.
+
+Not done:
+- **No settle/unsettle action.** `thread.settle` / `thread.unsettle` exist and are gated on the
+  `threadSettlement` capability; we only *read* `settledOverride`, so a thread can be pinned from
+  the desktop but not from the phone.
+- **`autoSettleAfterDays` is hardcoded to 3.** It is really a server setting; we decode only
+  `environment` and `cwd` from `ServerConfig`, so the user's configured value is ignored.
+- **No change-request input.** T3 Code also settles on a merged PR and keeps a thread active while
+  its PR is open (`changeRequestState`). We have no pull-request surface, so those branches are
+  omitted rather than guessed.
+- **No snooze shelf and no settled-tail paging.** T3 Code renders active → pending → snoozed →
+  settled, and pages the deep settled tail behind "Show more". We render active → settled, all of it.
+
 ### Thread creation
 Only replying to existing threads works. `thread.create` needs project selection and a worktree/
 local decision (`ThreadEnvMode`).
