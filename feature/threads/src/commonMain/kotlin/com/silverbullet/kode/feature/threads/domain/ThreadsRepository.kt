@@ -7,6 +7,7 @@ import com.silverbullet.kode.core.model.DispatchResult
 import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ThreadApprovalRespondCommand
+import com.silverbullet.kode.core.model.ThreadTurnInterruptCommand
 import com.silverbullet.kode.core.model.ThreadTurnStartCommand
 import com.silverbullet.kode.core.model.ThreadUserInputRespondCommand
 import com.silverbullet.kode.core.model.UserMessageInput
@@ -99,6 +100,24 @@ class ThreadsRepository(
                 ),
                 runtimeMode = runtimeMode,
                 interactionMode = interactionMode,
+                createdAt = timeProvider.nowIso(),
+            ) as ClientOrchestrationCommand,
+        )
+    }
+
+    /** Stops the running turn. */
+    suspend fun interruptTurn(
+        threadId: ThreadId,
+        turnId: String?,
+    ): Result<DispatchResult> = runCatchingCancellable {
+        val client = supervisor.session.value
+            ?: error("Not connected to an environment.")
+
+        client.dispatchCommand(
+            ThreadTurnInterruptCommand(
+                commandId = idGenerator.newId(),
+                threadId = threadId,
+                turnId = turnId,
                 createdAt = timeProvider.nowIso(),
             ) as ClientOrchestrationCommand,
         )

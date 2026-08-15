@@ -42,14 +42,21 @@ class T3EnvironmentClient(
     )
 
     /**
-     * `server.probe` — a cheap liveness check used when the app returns to the
-     * foreground, instead of tearing down a healthy socket.
+     * A cheap liveness check, used when the app returns to the foreground
+     * instead of tearing down a healthy socket.
      *
-     * Only available when the descriptor advertises the `connectionProbe`
-     * capability; callers fall back to [getConfig] otherwise.
+     * `server.probe` exists only on servers that advertise the
+     * `connectionProbe` capability. Calling it unconditionally would fail on
+     * older servers and be read as a dead session, so this falls back to
+     * `server.getConfig`, which every server has — the same choice
+     * `RpcSessionFactory` makes.
      */
-    suspend fun probe() {
-        connection.request(Methods.SERVER_PROBE)
+    suspend fun probe(config: ServerConfig) {
+        if (config.environment.capabilities.connectionProbe) {
+            connection.request(Methods.SERVER_PROBE)
+        } else {
+            connection.request(Methods.SERVER_GET_CONFIG)
+        }
     }
 
     /**

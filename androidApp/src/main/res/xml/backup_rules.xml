@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Belt and braces alongside android:allowBackup="false".
+
+  The paired environment's access token lives in DataStore under filesDir. It is
+  a 30-day bearer credential scoped `orchestration:operate` and
+  `terminal:operate` — enough to run commands on the paired machine — so it must
+  never leave the device via Auto Backup or `adb backup`.
+-->
+<full-backup-content>
+    <exclude domain="file" path="." />
+</full-backup-content>

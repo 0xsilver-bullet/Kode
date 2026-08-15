@@ -155,6 +155,16 @@ private fun ConnectionStatusCard(
                     CircularProgressIndicator()
                 }
 
+                ConnectionState.Offline -> {
+                    Text("Offline", style = MaterialTheme.typography.titleMedium)
+                    // No spinner and no countdown: nothing is scheduled until
+                    // the network comes back.
+                    Text(
+                        "Waiting for a network connection.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
                 is ConnectionState.Reconnecting -> {
                     Text("Reconnecting…", style = MaterialTheme.typography.titleMedium)
                     Text(

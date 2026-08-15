@@ -63,6 +63,21 @@ data class ThreadUserInputRespondCommand(
 ) : ClientOrchestrationCommand
 
 /**
+ * Stops the running turn.
+ *
+ * `turnId` is optional in the contract: omitting it interrupts whichever turn is
+ * currently running, which is what a Stop button means.
+ */
+@Serializable
+@SerialName("thread.turn.interrupt")
+data class ThreadTurnInterruptCommand(
+    override val commandId: String,
+    override val threadId: ThreadId,
+    override val createdAt: String,
+    val turnId: String? = null,
+) : ClientOrchestrationCommand
+
+/**
  * Answers a pending approval request.
  *
  * `ProviderApprovalDecision` also defines `cancel`, which T3 Code's mobile

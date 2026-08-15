@@ -19,6 +19,15 @@ sealed interface ConnectionState {
     data object Connecting : ConnectionState
 
     /**
+     * The device has no usable network.
+     *
+     * Distinct from [Reconnecting] because nothing is scheduled: there is no
+     * timer and no retry attempt being consumed. The UI must not imply a
+     * countdown that is not running.
+     */
+    data object Offline : ConnectionState
+
+    /**
      * A previous attempt failed transiently and another is scheduled.
      * Transient failures retry forever; the backoff is capped, never abandoned.
      */

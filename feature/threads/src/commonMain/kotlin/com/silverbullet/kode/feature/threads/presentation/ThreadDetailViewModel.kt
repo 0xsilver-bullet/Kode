@@ -37,6 +37,10 @@ class ThreadDetailViewModel(
     private val _composer = MutableStateFlow(ComposerState())
     private val userInputForm = MutableStateFlow(UserInputFormState())
     private val approvalForm = MutableStateFlow(ApprovalFormState())
+    private val _interrupting = MutableStateFlow(false)
+
+    /** True while a stop request is in flight. */
+    val interrupting: StateFlow<Boolean> = _interrupting.asStateFlow()
 
     /**
      * Exposed separately from [feed] on purpose.
@@ -145,6 +149,30 @@ class ThreadDetailViewModel(
     fun toggleWorkGroup(groupId: String) {
         expansion.value = expansion.value.let {
             it.copy(workGroups = it.workGroups.toggle(groupId))
+        }
+    }
+
+    /**
+     * Stops the running turn.
+     *
+     * No turn id: the contract makes it optional and omitting it interrupts
+     * whichever turn is running, which is what a Stop button means. The
+     * indicator clears when the session leaves `running`, not when this
+     * returns — a dispatched interrupt is a request, not a completed stop.
+     */
+    fun interruptTurn() {
+        if (_interrupting.value) return
+
+        viewModelScope.launch {
+            _interrupting.value = true
+            val result = repository.interruptTurn(threadId = threadId, turnId = null)
+            _interrupting.value = false
+
+            result.exceptionOrNull()?.let { failure ->
+                _composer.value = _composer.value.copy(
+                    error = failure.message ?: "Could not stop the turn.",
+                )
+            }
         }
     }
 

@@ -1,7 +1,11 @@
 package com.silverbullet.kode.di
 
+import com.silverbullet.kode.core.common.AlwaysOnlineNetworkMonitor
+import com.silverbullet.kode.core.common.AppLifecycleMonitor
 import com.silverbullet.kode.core.common.DefaultDispatcherProvider
 import com.silverbullet.kode.core.common.DispatcherProvider
+import com.silverbullet.kode.core.common.NetworkMonitor
+import com.silverbullet.kode.core.common.NoOpAppLifecycleMonitor
 import com.silverbullet.kode.core.datastore.di.dataStoreModule
 import com.silverbullet.kode.core.network.di.networkModule
 import com.silverbullet.kode.core.session.EnvironmentSupervisor
@@ -21,6 +25,10 @@ val ApplicationScopeQualifier = named("kode.applicationScope")
 
 private val appModule = module {
     single<DispatcherProvider> { DefaultDispatcherProvider() }
+    // Overridden by the platform module where a real implementation exists;
+    // these keep the graph resolvable on hosts that have none yet.
+    single<NetworkMonitor> { AlwaysOnlineNetworkMonitor() }
+    single<AppLifecycleMonitor> { NoOpAppLifecycleMonitor() }
     single(ApplicationScopeQualifier) {
         // SupervisorJob so one failed long-running task cannot take down the
         // rest of the app's background work.
@@ -39,14 +47,16 @@ private val appModule = module {
  */
 fun initKoin(platformModule: Module): KoinApplication {
     val application = startKoin {
+        // The platform module is applied last and may replace the defaults above.
+        allowOverride(true)
         modules(
-            platformModule,
             appModule,
             networkModule,
             dataStoreModule,
             sessionModule,
             connectionModule,
             threadsModule,
+            platformModule,
         )
     }
 

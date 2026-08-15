@@ -84,8 +84,10 @@ Pair with a running T3 Code server, browse its threads, watch a turn stream in l
   collapsible cards docked above the composer.
 
 `EnvironmentSupervisor` is the app's single retry owner and ports T3 Code's policy — retry forever
-with backoff capped at 16s, reset after 30s of stability, and stay blocked (no timer, no attempts
-consumed) on authentication or configuration failures. Feature code subscribes through
+with backoff capped at 16s, reset after 30s of stability, stay blocked (no timer, no attempts
+consumed) on authentication or configuration failures, wait out being offline without spending the
+retry ladder, and on returning to the foreground probe the live session rather than replacing it
+unless the app was away long enough that the socket is likely dead. Feature code subscribes through
 `supervisor.session`, so subscriptions move to a replacement socket after a reconnect instead of
 holding a dead one.
 

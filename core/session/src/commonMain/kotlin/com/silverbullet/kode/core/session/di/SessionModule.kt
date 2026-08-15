@@ -13,6 +13,8 @@ val sessionModule = module {
             authApi = get(),
             transport = get(),
             environmentStore = get(),
+            networkMonitor = get(),
+            appLifecycleMonitor = get(),
         )
     }
 }

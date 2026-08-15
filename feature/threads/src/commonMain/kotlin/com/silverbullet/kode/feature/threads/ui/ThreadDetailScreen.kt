@@ -23,12 +23,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -87,11 +89,14 @@ fun ThreadDetailRoute(
     viewModel: ThreadDetailViewModel = koinViewModel { parametersOf(threadId) },
 ) {
     val feed by viewModel.feed.collectAsStateWithLifecycle()
+    val interrupting by viewModel.interrupting.collectAsStateWithLifecycle()
 
     ThreadDetailScreen(
         feed = feed,
+        interrupting = interrupting,
         onToggleTurn = viewModel::toggleTurn,
         onToggleWorkGroup = viewModel::toggleWorkGroup,
+        onInterrupt = viewModel::interruptTurn,
         modifier = modifier,
         footer = { footerModifier ->
             // Both collect their own state, so a keystroke never reaches the
@@ -136,8 +141,10 @@ fun ThreadDetailRoute(
 @Composable
 fun ThreadDetailScreen(
     feed: ThreadFeedUiState,
+    interrupting: Boolean,
     onToggleTurn: (String) -> Unit,
     onToggleWorkGroup: (String) -> Unit,
+    onInterrupt: () -> Unit,
     modifier: Modifier = Modifier,
     footer: @Composable (Modifier) -> Unit,
 ) {
@@ -185,7 +192,9 @@ fun ThreadDetailScreen(
             }
         }
 
-        if (feed.isBusy) WorkingIndicator()
+        if (feed.isBusy) {
+            WorkingIndicator(interrupting = interrupting, onInterrupt = onInterrupt)
+        }
 
         HorizontalDivider(color = KodeTheme.colors.divider)
         footer(
@@ -434,10 +443,14 @@ private fun ActivityIcon.vector() = when (this) {
     ActivityIcon.Zap -> KodeIcons.Zap
 }
 
+/**
+ * Shown while a turn runs. Carries the only way to stop one from the phone —
+ * without it, a thread in `auto` mode cannot be reined in remotely.
+ */
 @Composable
-private fun WorkingIndicator() {
+private fun WorkingIndicator(interrupting: Boolean, onInterrupt: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -447,10 +460,18 @@ private fun WorkingIndicator() {
             color = KodeTheme.colors.toolAccent,
         )
         Text(
-            "Working…",
+            text = if (interrupting) "Stopping…" else "Working…",
             style = MaterialTheme.typography.bodySmall,
             color = KodeTheme.colors.muted,
+            modifier = Modifier.weight(1f),
         )
+        TextButton(
+            onClick = onInterrupt,
+            enabled = !interrupting,
+            colors = ButtonDefaults.textButtonColors(contentColor = KodeTheme.colors.danger),
+        ) {
+            Text("Stop")
+        }
     }
 }
 

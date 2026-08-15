@@ -9,20 +9,26 @@ Anything marked **blocking** means a later milestone cannot be correct without i
 
 ## Connection & session
 
-### Foreground reconnect and network awareness — **blocking for reliable live streams**
-`EnvironmentSupervisor.onApplicationActive()` exists and nothing calls it. There is also no offline
-detection, so a backgrounded phone burns retry attempts against a dead radio.
+### Foreground reconnect and network awareness — implemented on Android
+`NetworkMonitor` and `AppLifecycleMonitor` (`:core:common`) feed the supervisor. Android
+implementations use `ConnectivityManager` (gated on `NET_CAPABILITY_VALIDATED`, so an associated but
+unusable Wi-Fi does not count as online) and `ProcessLifecycleOwner` (process-wide, so rotation and
+inter-activity moves do not fire).
 
-T3 Code's policy (`docs/internals/connection-runtime.md`) is specific and worth porting exactly:
-- while offline, release the session and wait for a signal **without** consuming retries or running
-  a timer;
-- during establishment, ignore plain activation, but honour `application-active-reconnect` after a
-  meaningful background suspension — the OS may have killed the socket underneath the attempt;
-- once connected, plain activation triggers `session.probe` rather than a reconnect. A healthy
-  session must survive foregrounding.
+Policy ported from `monitorConnectedLease`:
+- offline releases the session and waits, consuming no retry attempt and running no timer —
+  surfaced as `ConnectionState.Offline`, which the UI must not render with a countdown;
+- a plain foreground **probes** the live session rather than replacing it, so a healthy socket
+  survives switching apps;
+- a foreground after `MEANINGFUL_SUSPENSION_MILLIS` (30s) **replaces** it, because the OS may have
+  killed it silently and probing would only wait for a timeout.
 
-Needs an `expect`/`actual` lifecycle + connectivity source (Android: `ConnectivityManager` +
-`ProcessLifecycleOwner`; iOS: `NWPathMonitor` + scene notifications).
+`probe()` is capability-aware: `server.probe` only on servers advertising `connectionProbe`,
+otherwise `server.getConfig`, matching `RpcSessionFactory`.
+
+**iOS still has no implementation** — it falls back to `AlwaysOnlineNetworkMonitor` and
+`NoOpAppLifecycleMonitor`, so the supervisor relies purely on transport failures there. Needs
+`NWPathMonitor` plus scene notifications.
 
 ### Access token refresh — **blocking eventually, silently**
 Bearer sessions last 30 days (`DEFAULT_SESSION_TTL`). We store the token and never refresh or
@@ -32,6 +38,10 @@ At minimum, detect 401 on ticket issuance and surface "re-pair required" explici
 ### Secure credential storage
 The access token is in plain DataStore. `EnvironmentStore` is an interface precisely so this can
 move to Android Keystore / iOS Keychain. Acceptable for a personal dev tool, not for release.
+
+Backup exfiltration **is** closed: `allowBackup="false"` plus `backup_rules.xml` /
+`data_extraction_rules.xml` excluding `filesDir`, so the token cannot leave the device via Auto
+Backup, `adb backup`, or device transfer. On-device compromise is still unmitigated.
 
 ### Cleartext traffic is global
 `usesCleartextTraffic="true"` in the manifest. Needed for plain-HTTP LAN pairing, but it should be a
@@ -133,9 +143,14 @@ Three places we intentionally differ from T3 Code's mobile client, which is brok
 Not done: only the oldest open request is shown at a time (others are counted in the header, not
 queued in the UI), and there is no timeout/expiry handling beyond the stale-failure path.
 
-### Turn interruption
-`thread.turn.interrupt` — no way to stop a running turn from the phone. This is also where
-`ProviderApprovalDecision.cancel` belongs.
+### Turn interruption — implemented
+A **Stop** control sits on the working indicator and dispatches `thread.turn.interrupt` with no
+`turnId`, which the contract treats as "whichever turn is running". The indicator clears when the
+session leaves `running`, not when the dispatch returns: an interrupt is a request, not a completed
+stop.
+
+`ProviderApprovalDecision.cancel` still is not surfaced; it cancels a turn from an approval prompt
+and would belong here rather than on the approval card.
 
 ### Thread creation
 Only replying to existing threads works. `thread.create` needs project selection and a worktree/

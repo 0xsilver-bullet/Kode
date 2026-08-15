@@ -143,6 +143,7 @@ private fun ConnectionBadge() {
 
     val label = when (connection) {
         ConnectionState.Connecting -> "Connecting…"
+        ConnectionState.Offline -> "Offline"
         is ConnectionState.Reconnecting -> "Reconnecting…"
         is ConnectionState.Blocked -> "Disconnected"
         is ConnectionState.Connected, ConnectionState.Unpaired -> return
