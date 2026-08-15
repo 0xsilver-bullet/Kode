@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Kanagawa Lotus: lotusWhite3, the light-variant background. -->
+    <color name="kode_window_background">#F2ECBC</color>
+</resources>

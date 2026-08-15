@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The window background shows during launch and behind the transparent
+      system bars. Leaving it at the platform default is what produced a white
+      flash and white-looking bars; these match the Kanagawa Lotus (light) and
+      Wave (dark) backgrounds that Compose then draws.
+    -->
+    <style name="Theme.Kode" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/kode_window_background</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+</resources>

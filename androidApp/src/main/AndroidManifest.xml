@@ -1,16 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
     <application
+            android:name=".KodeApplication"
             android:allowBackup="true"
             android:icon="@mipmap/ic_launcher"
             android:label="@string/app_name"
             android:roundIcon="@mipmap/ic_launcher_round"
             android:supportsRtl="true"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+            android:theme="@style/Theme.Kode"
+            android:usesCleartextTraffic="true">
+        <!--
+          Required, and not optional under edge-to-edge.
+
+          Left unset, the system resolves `adjustUnspecified` itself and may pan
+          the whole window up when the keyboard opens. The app already moves the
+          composer with `WindowInsets.ime`, so a panning window applies the
+          keyboard height a second time: the transcript is pushed up twice as
+          far and a keyboard-sized blank gap opens under the composer.
+
+          With `enableEdgeToEdge()` the decor view no longer fits system windows,
+          so `adjustResize` does not resize the window either — it just pins the
+          mode and guarantees IME insets are dispatched, including below API 30
+          where `WindowInsetsCompat` depends on it.
+        -->
         <activity
                 android:exported="true"
-                android:name=".MainActivity">
+                android:name=".MainActivity"
+                android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
 

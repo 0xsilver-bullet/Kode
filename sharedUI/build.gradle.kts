@@ -5,8 +5,14 @@ plugins {
     alias(libs.plugins.androidMultiplatformLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+    alias(libs.plugins.kotlinSerialization)
 }
 
+/**
+ * Composition root for the app UI: theme, navigation, DI startup, and the
+ * assembly of feature screens. Feature modules own their own screens; this
+ * module only wires them together.
+ */
 kotlin {
 
     android {
@@ -37,6 +43,10 @@ kotlin {
         }
         commonMain.dependencies {
             api(project(":sharedLogic"))
+            api(project(":feature:connection"))
+            api(project(":feature:threads"))
+            api(project(":core:designsystem"))
+
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
@@ -45,6 +55,13 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
+
+            implementation(libs.koin.core)
+            implementation(libs.koin.compose)
+            implementation(libs.koin.compose.viewmodel)
+
+            implementation(libs.navigation.compose)
+            implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -54,4 +71,10 @@ kotlin {
 
 dependencies {
     androidRuntimeClasspath(libs.compose.uiTooling)
+}
+
+composeCompiler {
+    stabilityConfigurationFiles.add(
+        rootProject.layout.projectDirectory.file("compose_stability.conf"),
+    )
 }
