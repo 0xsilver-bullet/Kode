@@ -1,6 +1,8 @@
 package com.silverbullet.kode.feature.threads.domain
 
+import com.silverbullet.kode.core.model.InteractionMode
 import com.silverbullet.kode.core.model.MessageRole
+import com.silverbullet.kode.core.model.ModelSelection
 import com.silverbullet.kode.core.model.OrchestrationEvent
 import com.silverbullet.kode.core.model.OrchestrationMessage
 import com.silverbullet.kode.core.model.OrchestrationSession
@@ -8,6 +10,7 @@ import com.silverbullet.kode.core.model.OrchestrationThread
 import com.silverbullet.kode.core.model.OrchestrationThreadActivity
 import com.silverbullet.kode.core.model.OrchestrationThreadDetailSnapshot
 import com.silverbullet.kode.core.model.ProjectId
+import com.silverbullet.kode.core.model.RuntimeMode
 import com.silverbullet.kode.core.model.SessionStatus
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ThreadStreamItem
@@ -68,6 +71,46 @@ class ThreadDetailStateTest {
         state = state.reduce(event)
 
         assertEquals(1, state.activities.size)
+    }
+
+    @Test
+    fun `a model change is reflected in the thread`() {
+        // Ignoring this event was why a configuration change looked like it had
+        // silently failed: the command was accepted, but nothing updated the
+        // thread the UI renders from.
+        var state = ThreadDetailState().reduce(snapshotItem())
+        state = state.reduce(
+            ThreadStreamItem.Event(
+                OrchestrationEvent.MetaUpdated(
+                    sequence = 2,
+                    threadId = threadId,
+                    modelSelection = ModelSelection("anthropic", "opus"),
+                    title = null,
+                ),
+            ),
+        )
+
+        assertEquals(ModelSelection("anthropic", "opus"), state.thread?.modelSelection)
+        // A null field in the event must not wipe the existing value.
+        assertEquals("Port the RPC layer", state.thread?.title)
+    }
+
+    @Test
+    fun `runtime and interaction mode changes are reflected`() {
+        var state = ThreadDetailState().reduce(snapshotItem())
+        state = state.reduce(
+            ThreadStreamItem.Event(
+                OrchestrationEvent.RuntimeModeSet(2, threadId, RuntimeMode.FULL_ACCESS),
+            ),
+        )
+        state = state.reduce(
+            ThreadStreamItem.Event(
+                OrchestrationEvent.InteractionModeSet(3, threadId, InteractionMode.PLAN),
+            ),
+        )
+
+        assertEquals(RuntimeMode.FULL_ACCESS, state.thread?.runtimeMode)
+        assertEquals(InteractionMode.PLAN, state.thread?.interactionMode)
     }
 
     @Test

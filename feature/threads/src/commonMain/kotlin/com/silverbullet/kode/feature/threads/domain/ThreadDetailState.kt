@@ -103,6 +103,23 @@ private fun ThreadDetailState.reduce(event: OrchestrationEvent): ThreadDetailSta
 
     is OrchestrationEvent.SessionSet -> copy(session = event.session)
 
+    // Without these three the thread we render from never changed, so a
+    // configuration change looked like it had silently failed.
+    is OrchestrationEvent.MetaUpdated -> copy(
+        thread = thread?.copy(
+            modelSelection = event.modelSelection ?: thread.modelSelection,
+            title = event.title ?: thread.title,
+        ),
+    )
+
+    is OrchestrationEvent.RuntimeModeSet -> copy(
+        thread = thread?.copy(runtimeMode = event.runtimeMode),
+    )
+
+    is OrchestrationEvent.InteractionModeSet -> copy(
+        thread = thread?.copy(interactionMode = event.interactionMode),
+    )
+
     // Diff results are not rendered yet; the event still means the turn's
     // follow-up work settled.
     is OrchestrationEvent.TurnDiffCompleted -> this

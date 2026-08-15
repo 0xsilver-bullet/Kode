@@ -21,25 +21,30 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,10 +61,19 @@ import com.silverbullet.kode.feature.threads.domain.ActivityIcon
 import com.silverbullet.kode.feature.threads.domain.ActivityPresentation
 import com.silverbullet.kode.feature.threads.domain.ActivityStatus
 import com.silverbullet.kode.feature.threads.domain.FeedEntry
+import com.silverbullet.kode.feature.threads.domain.INTERACTION_MODE_CHOICES
+import com.silverbullet.kode.feature.threads.domain.RUNTIME_MODE_CHOICES
+import com.silverbullet.kode.feature.threads.domain.activeOptionLabels
+import com.silverbullet.kode.feature.threads.domain.currentLabel
+import com.silverbullet.kode.feature.threads.domain.currentValueOrDefault
+import com.silverbullet.kode.feature.threads.domain.runtimeModeLabel
+import com.silverbullet.kode.feature.threads.domain.selectableChoices
 import com.silverbullet.kode.feature.threads.presentation.ComposerState
 import com.silverbullet.kode.feature.threads.presentation.ThreadDetailViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadFeedUiState
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -129,8 +143,20 @@ fun ThreadDetailRoute(
                 val composerState by viewModel.composer.collectAsStateWithLifecycle()
                 Composer(
                     state = composerState,
+                    config = ThreadConfig(
+                        catalog = feed.catalog,
+                        selectedModel = feed.selectedModel,
+                        lockedDriver = feed.lockedDriver,
+                        optionDescriptors = feed.optionDescriptors,
+                        runtimeMode = feed.runtimeMode,
+                        interactionMode = feed.interactionMode,
+                    ),
                     onDraftChanged = viewModel::onDraftChanged,
                     onSend = viewModel::send,
+                    onModelSelected = viewModel::selectModel,
+                    onModelOptionSelected = viewModel::selectModelOption,
+                    onRuntimeModeSelected = viewModel::selectRuntimeMode,
+                    onInteractionModeSelected = viewModel::selectInteractionMode,
                     modifier = footerModifier,
                 )
             }
@@ -475,52 +501,166 @@ private fun WorkingIndicator(interrupting: Boolean, onInterrupt: () -> Unit) {
     }
 }
 
+/**
+ * The composer, laid out like T3 Code's: a rounded input, then a control row of
+ * an attach affordance, a single pill summarising the whole agent config, and a
+ * circular send button.
+ *
+ * One summary pill rather than one pill per setting — reasoning, context window
+ * and fast mode all belong to the chosen model, and splitting them crowded the
+ * row while hiding that relationship.
+ */
 @Composable
 private fun Composer(
     state: ComposerState,
+    config: ThreadConfig,
     onDraftChanged: (String) -> Unit,
     onSend: () -> Unit,
+    onModelSelected: (com.silverbullet.kode.feature.threads.domain.ModelOption) -> Unit,
+    onModelOptionSelected: (String, JsonPrimitive) -> Unit,
+    onRuntimeModeSelected: (String) -> Unit,
+    onInteractionModeSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.padding(12.dp)) {
+    var sheetOpen by remember { mutableStateOf(false) }
+    val colors = KodeTheme.colors
+
+    Column(modifier = modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         state.error?.let { error ->
             Text(
                 text = error,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(bottom = 4.dp),
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                    RoundedCornerShape(24.dp),
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            BasicTextField(
+                value = state.draft,
+                onValueChange = onDraftChanged,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodyLarge
+                    .copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                maxLines = 6,
+                decorationBox = { inner ->
+                    if (state.draft.isEmpty()) {
+                        Text(
+                            text = "Ask the repo agent, or run a command…",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = colors.muted,
+                        )
+                    }
+                    inner()
+                },
             )
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
-                value = state.draft,
-                onValueChange = onDraftChanged,
+            // Attachments are not implemented; the affordance is deliberately
+            // absent rather than present and dead.
+            ConfigSummaryPill(
+                config = config,
+                onClick = { sheetOpen = true },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Message") },
-                textStyle = MaterialTheme.typography.bodyLarge,
-                maxLines = 5,
             )
 
-            Button(
-                onClick = onSend,
+            SendButton(
                 enabled = state.canSend,
-                modifier = Modifier.padding(bottom = 8.dp),
-            ) {
-                if (state.isSending) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
+                sending = state.isSending,
+                onSend = onSend,
+            )
+        }
+    }
+
+    if (sheetOpen) {
+        ThreadConfigSheet(
+            config = config,
+            onModelSelected = onModelSelected,
+            onOptionSelected = onModelOptionSelected,
+            onRuntimeModeSelected = onRuntimeModeSelected,
+            onInteractionModeSelected = onInteractionModeSelected,
+            onDismiss = { sheetOpen = false },
+        )
+    }
+}
+
+/** "Claude Opus 5 · Medium · 1M · Fast mode" — the whole config in one line. */
+@Composable
+private fun ConfigSummaryPill(
+    config: ThreadConfig,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val summary = remember(config) {
+        buildList {
+            config.selectedModel?.label?.let(::add)
+            addAll(config.optionDescriptors.activeOptionLabels())
+            config.runtimeMode?.let { add(runtimeModeLabel(it)) }
+        }.joinToString(" · ").ifEmpty { "Configure agent" }
+    }
+
+    Row(
+        modifier = modifier
+            .background(
+                MaterialTheme.colorScheme.surfaceContainerHigh,
+                RoundedCornerShape(999.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun SendButton(enabled: Boolean, sending: Boolean, onSend: () -> Unit) {
+    val background = if (enabled) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .background(background, CircleShape)
+            .clickable(enabled = enabled && !sending, onClick = onSend),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (sending) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(
+                imageVector = KodeIcons.ArrowUp,
+                contentDescription = "Send",
+                tint = if (enabled) {
+                    MaterialTheme.colorScheme.onPrimary
                 } else {
-                    Text("Send")
-                }
-            }
+                    KodeTheme.colors.muted
+                },
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }

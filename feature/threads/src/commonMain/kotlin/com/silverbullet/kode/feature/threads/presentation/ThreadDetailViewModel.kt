@@ -5,9 +5,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.silverbullet.kode.core.common.DispatcherProvider
 import com.silverbullet.kode.core.model.InteractionMode
+import com.silverbullet.kode.core.model.ModelSelection
+import com.silverbullet.kode.core.model.ProviderOptionDescriptor
 import com.silverbullet.kode.core.model.RuntimeMode
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.feature.threads.domain.FeedEntry
+import com.silverbullet.kode.feature.threads.domain.ModelOption
+import com.silverbullet.kode.feature.threads.domain.ProviderCatalog
+import com.silverbullet.kode.feature.threads.domain.applyOptionSelection
+import com.silverbullet.kode.feature.threads.domain.lockedDriver
+import com.silverbullet.kode.feature.threads.domain.modelChangeBlockedReason
+import com.silverbullet.kode.feature.threads.domain.resolveOptionDescriptors
 import com.silverbullet.kode.feature.threads.domain.FeedExpansion
 import com.silverbullet.kode.feature.threads.domain.PendingApproval
 import com.silverbullet.kode.feature.threads.domain.PendingUserInput
@@ -26,6 +34,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
 
 class ThreadDetailViewModel(
     private val threadId: ThreadId,
@@ -112,8 +121,32 @@ class ThreadDetailViewModel(
      * every message and activity, and re-runs on every streamed delta.
      */
     val feed: StateFlow<ThreadFeedUiState> =
-        combine(repository.thread(threadId), expansion) { detail, expanded ->
+        combine(
+            repository.thread(threadId),
+            expansion,
+            repository.catalog,
+        ) { detail, expanded, catalog ->
+            val selection = detail.thread?.modelSelection
+            val selected = catalog.optionFor(selection)
+            // Started means a turn, a message, or a session — matching
+            // `threadHasStarted`. Using the session alone let a thread with
+            // messages be re-pointed at another provider.
+            val hasStarted = detail.thread?.latestTurn != null ||
+                detail.messages.isNotEmpty() ||
+                detail.session != null
+            val locked = lockedDriver(
+                hasStarted = hasStarted,
+                sessionProviderName = detail.session?.providerName,
+                currentDriver = selected?.driver,
+            )
             ThreadFeedUiState(
+                catalog = catalog,
+                modelSelection = selection,
+                selectedModel = selected,
+                lockedDriver = locked,
+                optionDescriptors = selected?.model
+                    ?.resolveOptionDescriptors(selection?.options)
+                    .orEmpty(),
                 entries = buildFeed(
                     messages = detail.messages,
                     activities = detail.activities,
@@ -128,6 +161,7 @@ class ThreadDetailViewModel(
                 streamingMessageId = detail.messages.lastOrNull { it.streaming }?.id,
                 runtimeMode = detail.thread?.runtimeMode,
                 interactionMode = detail.thread?.interactionMode,
+                hasStartedSession = hasStarted,
             )
         }.flowOn(dispatchers.default)
             .stateIn(
@@ -171,6 +205,80 @@ class ThreadDetailViewModel(
             result.exceptionOrNull()?.let { failure ->
                 _composer.value = _composer.value.copy(
                     error = failure.message ?: "Could not stop the turn.",
+                )
+            }
+        }
+    }
+
+    /**
+     * Changes the thread's model, or reports why it cannot change.
+     *
+     * The refusal is not "no changes after the first message" — it is that some
+     * providers cannot switch mid-conversation, so the block depends on which
+     * provider you are coming from and going to.
+     */
+    fun selectModel(option: ModelOption) {
+        val state = feed.value
+        val blocked = modelChangeBlockedReason(
+            current = state.modelSelection,
+            next = option.selection,
+            catalog = state.catalog,
+            hasStartedSession = state.hasStartedSession,
+            lockedDriver = state.lockedDriver,
+        )
+        if (blocked != null) {
+            _composer.value = _composer.value.copy(error = blocked)
+            return
+        }
+
+        viewModelScope.launch {
+            repository.setModelSelection(threadId, option.selection)
+                .exceptionOrNull()
+                ?.let { failure ->
+                    _composer.value = _composer.value.copy(
+                        error = failure.message ?: "Could not change the model.",
+                    )
+                }
+        }
+    }
+
+    /**
+     * Changes one per-model option, such as reasoning effort.
+     *
+     * The whole selection list is rewritten each time: the contract stores
+     * options on the model selection, not as a patch.
+     */
+    fun selectModelOption(id: String, value: JsonPrimitive) {
+        val state = feed.value
+        val selection = state.modelSelection ?: return
+        val next = state.optionDescriptors.applyOptionSelection(id, value) ?: return
+
+        viewModelScope.launch {
+            repository.setModelSelection(threadId, selection.copy(options = next))
+                .exceptionOrNull()
+                ?.let { failure ->
+                    _composer.value = _composer.value.copy(
+                        error = failure.message ?: "Could not change that option.",
+                    )
+                }
+        }
+    }
+
+    fun selectRuntimeMode(mode: String) {
+        viewModelScope.launch {
+            repository.setRuntimeMode(threadId, mode).exceptionOrNull()?.let { failure ->
+                _composer.value = _composer.value.copy(
+                    error = failure.message ?: "Could not change permissions.",
+                )
+            }
+        }
+    }
+
+    fun selectInteractionMode(mode: String) {
+        viewModelScope.launch {
+            repository.setInteractionMode(threadId, mode).exceptionOrNull()?.let { failure ->
+                _composer.value = _composer.value.copy(
+                    error = failure.message ?: "Could not change the mode.",
                 )
             }
         }
@@ -370,6 +478,13 @@ class ThreadDetailViewModel(
 @Immutable
 data class ThreadFeedUiState(
     val entries: List<FeedEntry> = emptyList(),
+    val catalog: ProviderCatalog = ProviderCatalog(),
+    val modelSelection: ModelSelection? = null,
+    val selectedModel: ModelOption? = null,
+    val hasStartedSession: Boolean = false,
+    /** The driver this thread is pinned to once started, if any. */
+    val lockedDriver: String? = null,
+    val optionDescriptors: List<ProviderOptionDescriptor> = emptyList(),
     val title: String? = null,
     val isBusy: Boolean = false,
     val hasThread: Boolean = false,

@@ -77,6 +77,31 @@ sealed interface OrchestrationEvent {
         val threadId: ThreadId,
     ) : OrchestrationEvent
 
+    /**
+     * The thread's metadata changed — title, or the model it runs on.
+     *
+     * Ignoring this was why a model change never appeared to take: the command
+     * was accepted, but nothing updated the thread we render from.
+     */
+    data class MetaUpdated(
+        override val sequence: Int,
+        val threadId: ThreadId,
+        val modelSelection: ModelSelection?,
+        val title: String?,
+    ) : OrchestrationEvent
+
+    data class RuntimeModeSet(
+        override val sequence: Int,
+        val threadId: ThreadId,
+        val runtimeMode: String,
+    ) : OrchestrationEvent
+
+    data class InteractionModeSet(
+        override val sequence: Int,
+        val threadId: ThreadId,
+        val interactionMode: String,
+    ) : OrchestrationEvent
+
     data class Unsupported(
         override val sequence: Int,
         val type: String,
@@ -121,6 +146,25 @@ private data class ThreadSessionSetPayload(
 
 @Serializable
 private data class ThreadIdPayload(val threadId: ThreadId)
+
+@Serializable
+private data class ThreadMetaUpdatedPayload(
+    val threadId: ThreadId,
+    val modelSelection: ModelSelection? = null,
+    val title: String? = null,
+)
+
+@Serializable
+private data class ThreadRuntimeModeSetPayload(
+    val threadId: ThreadId,
+    val runtimeMode: String,
+)
+
+@Serializable
+private data class ThreadInteractionModeSetPayload(
+    val threadId: ThreadId,
+    val interactionMode: String = InteractionMode.DEFAULT,
+)
 
 // ------------------------------------------------------------------- decoding
 
@@ -198,6 +242,30 @@ class OrchestrationStreamDecoder(private val json: Json) {
             "thread.session-set" -> {
                 val decoded: ThreadSessionSetPayload = decodePayload(payload, type)
                 OrchestrationEvent.SessionSet(sequence, decoded.threadId, decoded.session)
+            }
+
+            "thread.meta-updated" -> {
+                val decoded: ThreadMetaUpdatedPayload = decodePayload(payload, type)
+                OrchestrationEvent.MetaUpdated(
+                    sequence = sequence,
+                    threadId = decoded.threadId,
+                    modelSelection = decoded.modelSelection,
+                    title = decoded.title,
+                )
+            }
+
+            "thread.runtime-mode-set" -> {
+                val decoded: ThreadRuntimeModeSetPayload = decodePayload(payload, type)
+                OrchestrationEvent.RuntimeModeSet(sequence, decoded.threadId, decoded.runtimeMode)
+            }
+
+            "thread.interaction-mode-set" -> {
+                val decoded: ThreadInteractionModeSetPayload = decodePayload(payload, type)
+                OrchestrationEvent.InteractionModeSet(
+                    sequence,
+                    decoded.threadId,
+                    decoded.interactionMode,
+                )
             }
 
             "thread.turn-diff-completed" -> {

@@ -63,13 +63,13 @@ these are wants, not needs.
 ## Orchestration correctness
 
 ### Event coverage — **blocking for a trustworthy timeline**
-`OrchestrationEvent` has 29 variants; we handle four (`thread.message-sent`,
-`thread.activity-appended`, `thread.session-set`, `thread.turn-diff-completed`) and ignore the rest.
+`OrchestrationEvent` has 29 variants; we handle seven (`thread.message-sent`,
+`thread.activity-appended`, `thread.session-set`, `thread.turn-diff-completed`,
+`thread.meta-updated`, `thread.runtime-mode.set`, `thread.interaction-mode.set`) and ignore the
+rest.
 The timeline will silently drift on at least:
 - `thread.reverted` — a checkpoint revert rewrites history we keep showing;
 - `thread.deleted` / `thread.archived` — we keep rendering a gone thread;
-- `thread.meta-updated` — stale title;
-- `thread.runtime-mode-set` / `thread.interaction-mode-set` — we may send a turn with a stale mode.
 
 Mitigation in place: we always request a **full snapshot** on subscribe and resubscribe on
 reconnect, so drift is bounded by session lifetime.
@@ -169,9 +169,51 @@ Not done:
 - **No snooze shelf and no settled-tail paging.** T3 Code renders active → pending → snoozed →
   settled, and pages the deep settled tail behind "Show more". We render active → settled, all of it.
 
-### Thread creation
-Only replying to existing threads works. `thread.create` needs project selection and a worktree/
-local decision (`ThreadEnvMode`).
+### Thread creation — implemented, without branch or worktree choice
+`thread.create` from a New thread screen: project (from `subscribeShell`'s projects), title, model,
+permissions, and mode.
+
+**`branch` and `worktreePath` are always null**, so new threads run in the project's current
+checkout. Choosing either needs the `vcs.*` surface (`vcs.listRefs`, `vcs.createWorktree`), which
+this client does not have — T3 Code's new-task flow has a whole workspace picker on top of this.
+
+Also missing: `bootstrap` on `thread.turn.start`, which is how T3 Code creates a thread and sends
+the first message in one command. We create, navigate, and let the user send separately.
+
+### Model and permission configuration — implemented
+Options come from `ServerConfig.providers`, filtered to enabled *and* available instances
+(`isProviderAvailable`), with legacy models dropped. The composer carries pills for model,
+permissions, and mode; the New thread screen offers the same set.
+
+Model changes on a started thread respect `requiresNewThreadForModelChange`, ported from
+`getStartedThreadModelChangeBlockReason` — a change is refused only when the provider on either
+side of the switch cannot swap mid-conversation, not merely because messages exist.
+
+Per-model tunables (reasoning effort, fast mode) come from
+`ServerProviderModel.capabilities.optionDescriptors`, merged with the thread's stored
+`modelSelection.options` — a port of `getProviderOptionDescriptors`. Prompt-injected values and
+`ultracode` are filtered out of the picker (`selectableChoices`), and a value the model does not
+advertise is rejected rather than written.
+
+Descriptors are decoded as an **open** struct keyed on a `type` string rather than a sealed union:
+a sealed serializer would throw on a type a newer server introduces, failing the whole
+`ServerConfig` decode and so the connection. Unknown types render as nothing.
+
+Three rules gate a model change on a started thread, all ported:
+1. **driver lock** (`deriveLockedProvider`) — a started thread is pinned to its session's driver, so
+   a Claude thread cannot be handed to OpenCode. "Started" means a turn, a message, *or* a session,
+   matching `threadHasStarted`.
+2. **continuation groups** — instances in different `continuation.groupKey`s cannot resume each
+   other's conversations.
+3. **`requiresNewThreadForModelChange`** — some providers refuse any mid-conversation change.
+
+The composer shows a single summary pill (model · options · runtime) opening one sheet that holds
+models, their tunables, and runtime — matching the mobile app rather than a pill per setting.
+Legacy models stay in the catalog and appear behind a "Show legacy models" toggle, but are never
+chosen as a default.
+
+Not done: attachments (T3 Code's `+` control), per-provider slash commands and skills, and the
+`showInteractionModeToggle` flag — we always show the mode row.
 
 ### Attachments
 `ChatAttachment` / `UploadChatAttachment` are modelled as empty on send. Needs `assets.createUrl`

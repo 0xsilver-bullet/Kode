@@ -6,7 +6,13 @@ import com.silverbullet.kode.core.model.ClientOrchestrationCommand
 import com.silverbullet.kode.core.model.DispatchResult
 import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.ThreadId
+import com.silverbullet.kode.core.model.ModelSelection
+import com.silverbullet.kode.core.model.ProjectId
 import com.silverbullet.kode.core.model.ThreadApprovalRespondCommand
+import com.silverbullet.kode.core.model.ThreadCreateCommand
+import com.silverbullet.kode.core.model.ThreadInteractionModeSetCommand
+import com.silverbullet.kode.core.model.ThreadMetaUpdateCommand
+import com.silverbullet.kode.core.model.ThreadRuntimeModeSetCommand
 import com.silverbullet.kode.core.model.ThreadTurnInterruptCommand
 import com.silverbullet.kode.core.model.ThreadTurnStartCommand
 import com.silverbullet.kode.core.model.ThreadUserInputRespondCommand
@@ -20,6 +26,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.scan
 
 /**
@@ -99,6 +106,91 @@ class ThreadsRepository(
                     role = MessageRole.USER,
                 ),
                 runtimeMode = runtimeMode,
+                interactionMode = interactionMode,
+                createdAt = timeProvider.nowIso(),
+            ) as ClientOrchestrationCommand,
+        )
+    }
+
+    /** The live provider catalogue, empty until a session reports its config. */
+    val catalog: Flow<ProviderCatalog> =
+        supervisor.serverConfig.map { it?.providers.orEmpty().toCatalog() }
+
+    /**
+     * Creates a thread and returns its id.
+     *
+     * The id is generated here rather than by the server: `thread.create`
+     * carries it, so the caller can navigate to the thread without waiting for
+     * the shell subscription to catch up.
+     */
+    suspend fun createThread(
+        projectId: ProjectId,
+        title: String,
+        modelSelection: ModelSelection,
+        runtimeMode: String,
+        interactionMode: String,
+    ): Result<ThreadId> = runCatchingCancellable {
+        val client = supervisor.session.value
+            ?: error("Not connected to an environment.")
+        val threadId = ThreadId(idGenerator.newId())
+
+        client.dispatchCommand(
+            ThreadCreateCommand(
+                commandId = idGenerator.newId(),
+                threadId = threadId,
+                projectId = projectId,
+                title = title,
+                modelSelection = modelSelection,
+                runtimeMode = runtimeMode,
+                interactionMode = interactionMode,
+                createdAt = timeProvider.nowIso(),
+            ) as ClientOrchestrationCommand,
+        )
+        threadId
+    }
+
+    suspend fun setModelSelection(
+        threadId: ThreadId,
+        modelSelection: ModelSelection,
+    ): Result<DispatchResult> = runCatchingCancellable {
+        val client = supervisor.session.value
+            ?: error("Not connected to an environment.")
+
+        client.dispatchCommand(
+            ThreadMetaUpdateCommand(
+                commandId = idGenerator.newId(),
+                threadId = threadId,
+                modelSelection = modelSelection,
+            ) as ClientOrchestrationCommand,
+        )
+    }
+
+    suspend fun setRuntimeMode(threadId: ThreadId, runtimeMode: String): Result<DispatchResult> =
+        runCatchingCancellable {
+            val client = supervisor.session.value
+                ?: error("Not connected to an environment.")
+
+            client.dispatchCommand(
+                ThreadRuntimeModeSetCommand(
+                    commandId = idGenerator.newId(),
+                    threadId = threadId,
+                    runtimeMode = runtimeMode,
+                    createdAt = timeProvider.nowIso(),
+                ) as ClientOrchestrationCommand,
+            )
+        }
+
+    suspend fun setInteractionMode(
+        threadId: ThreadId,
+        interactionMode: String,
+    ): Result<DispatchResult> = runCatchingCancellable {
+        val client = supervisor.session.value
+            ?: error("Not connected to an environment.")
+
+        client.dispatchCommand(
+            ThreadInteractionModeSetCommand(
+                commandId = idGenerator.newId(),
+                threadId = threadId,
                 interactionMode = interactionMode,
                 createdAt = timeProvider.nowIso(),
             ) as ClientOrchestrationCommand,

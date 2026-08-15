@@ -71,6 +71,17 @@ class EnvironmentSupervisor(
      */
     val session: StateFlow<T3EnvironmentClient?> = _session.asStateFlow()
 
+    private val _serverConfig = MutableStateFlow<ServerConfig?>(null)
+
+    /**
+     * The live server's configuration, including its provider instances.
+     *
+     * Retained across reconnects: the provider catalogue does not change when a
+     * socket drops, and clearing it would blank every model picker during a
+     * momentary reconnect.
+     */
+    val serverConfig: StateFlow<ServerConfig?> = _serverConfig.asStateFlow()
+
     /** Conflated so a burst of taps collapses into a single wakeup. */
     private val wakeups = Channel<Wakeup>(Channel.CONFLATED)
 
@@ -199,6 +210,7 @@ class EnvironmentSupervisor(
                 workingDirectory = config.cwd,
             )
             connectedAt = timeSource.markNow()
+            _serverConfig.value = config
 
             // Published only after `getConfig` succeeds, so subscribers never
             // see a socket that has not proven itself responsive.

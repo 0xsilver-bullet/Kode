@@ -63,6 +63,63 @@ data class ThreadUserInputRespondCommand(
 ) : ClientOrchestrationCommand
 
 /**
+ * Creates a thread in a project.
+ *
+ * `branch` and `worktreePath` are always null here: choosing a branch or an
+ * isolated worktree needs the `vcs.*` surface, which this client does not have
+ * yet, so new threads run in the project's current checkout.
+ */
+@Serializable
+@SerialName("thread.create")
+data class ThreadCreateCommand(
+    override val commandId: String,
+    override val threadId: ThreadId,
+    val projectId: ProjectId,
+    val title: String,
+    val modelSelection: ModelSelection,
+    val runtimeMode: String,
+    val interactionMode: String,
+    override val createdAt: String,
+    val branch: String? = null,
+    val worktreePath: String? = null,
+) : ClientOrchestrationCommand
+
+/**
+ * Updates a thread's metadata.
+ *
+ * Note there is deliberately no `createdAt`: the contract does not carry one
+ * for this command.
+ */
+@Serializable
+@SerialName("thread.meta.update")
+data class ThreadMetaUpdateCommand(
+    override val commandId: String,
+    override val threadId: ThreadId,
+    val modelSelection: ModelSelection? = null,
+    val title: String? = null,
+) : ClientOrchestrationCommand {
+    override val createdAt: String get() = ""
+}
+
+@Serializable
+@SerialName("thread.runtime-mode.set")
+data class ThreadRuntimeModeSetCommand(
+    override val commandId: String,
+    override val threadId: ThreadId,
+    val runtimeMode: String,
+    override val createdAt: String,
+) : ClientOrchestrationCommand
+
+@Serializable
+@SerialName("thread.interaction-mode.set")
+data class ThreadInteractionModeSetCommand(
+    override val commandId: String,
+    override val threadId: ThreadId,
+    val interactionMode: String,
+    override val createdAt: String,
+) : ClientOrchestrationCommand
+
+/**
  * Stops the running turn.
  *
  * `turnId` is optional in the contract: omitting it interrupts whichever turn is

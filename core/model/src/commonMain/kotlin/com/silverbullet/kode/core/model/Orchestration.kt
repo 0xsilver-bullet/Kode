@@ -30,6 +30,13 @@ import kotlinx.serialization.Serializable
 data class ModelSelection(
     val instanceId: String,
     val model: String,
+    /**
+     * Per-model tunables such as reasoning effort.
+     *
+     * Null rather than empty when unset: the contract marks the key optional,
+     * and sending an empty array would overwrite server-side defaults.
+     */
+    val options: List<ProviderOptionSelection>? = null,
 )
 
 /** `RuntimeMode` — the safety/access mode for a thread or session. */

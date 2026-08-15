@@ -124,6 +124,21 @@ object KodeIcons {
         }
     }
 
+    /** Send: an upward arrow, as used inside a composer field. */
+    val ArrowUp: ImageVector by lazy {
+        strokeIcon("ArrowUp") {
+            moveTo(12f, 19f); lineTo(12f, 5f)
+            moveTo(6f, 11f); lineTo(12f, 5f); lineTo(18f, 11f)
+        }
+    }
+
+    val Plus: ImageVector by lazy {
+        strokeIcon("Plus") {
+            moveTo(12f, 5f); lineTo(12f, 19f)
+            moveTo(5f, 12f); lineTo(19f, 12f)
+        }
+    }
+
     val Zap: ImageVector by lazy {
         strokeIcon("Zap") {
             moveTo(13.5f, 3f); lineTo(5f, 13.5f); lineTo(11.5f, 13.5f)

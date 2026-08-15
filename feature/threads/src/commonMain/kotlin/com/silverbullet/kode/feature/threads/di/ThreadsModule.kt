@@ -7,6 +7,7 @@ import com.silverbullet.kode.core.common.UuidIdGenerator
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
 import com.silverbullet.kode.feature.threads.presentation.ThreadDetailViewModel
+import com.silverbullet.kode.feature.threads.presentation.NewThreadViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadListViewModel
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
@@ -25,6 +26,7 @@ val threadsModule = module {
     }
 
     viewModelOf(::ThreadListViewModel)
+    viewModelOf(::NewThreadViewModel)
 
     // The thread id comes from navigation, so it is a runtime parameter rather
     // than a resolved dependency.

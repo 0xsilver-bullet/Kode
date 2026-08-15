@@ -79,10 +79,11 @@ Pair with a running T3 Code server, browse its threads, watch a turn stream in l
 - `orchestration.subscribeThread` drives the timeline. Streaming assistant text arrives as
   `thread.message-sent` events carrying the **full accumulated text**, so the reducer upserts by
   message id rather than appending.
-- `orchestration.dispatchCommand` sends `thread.turn.start` into an existing thread, inheriting
-  that thread's runtime and interaction modes, and `thread.user-input.respond` /
-  `thread.approval.respond` to answer the agent's questions and approve its actions, from
-  collapsible cards docked above the composer.
+- `orchestration.dispatchCommand` carries everything the client writes: `thread.create` for new
+  threads, `thread.turn.start` to send, `thread.meta.update` / `thread.runtime-mode.set` /
+  `thread.interaction-mode.set` to configure the agent, `thread.turn.interrupt` to stop it, and
+  `thread.user-input.respond` / `thread.approval.respond` to answer questions and approve actions
+  from collapsible cards docked above the composer.
 
 `EnvironmentSupervisor` is the app's single retry owner and ports T3 Code's policy — retry forever
 with backoff capped at 16s, reset after 30s of stability, stay blocked (no timer, no attempts
