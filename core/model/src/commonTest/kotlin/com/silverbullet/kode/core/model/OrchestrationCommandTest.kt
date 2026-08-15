@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -64,6 +65,69 @@ class OrchestrationCommandTest {
             .jsonObject
 
         assertTrue("modelSelection" !in encoded)
+    }
+
+    @Test
+    fun `thread create sends explicit nulls for branch and worktree path`() {
+        // The contract types both as `NullOr`, not `optional`: the keys must be
+        // present even when null, despite `explicitNulls = false`.
+        val encoded = json.encodeToJsonElement(
+            ClientOrchestrationCommand.serializer(),
+            ThreadCreateCommand(
+                commandId = "cmd-2",
+                threadId = ThreadId("t2"),
+                projectId = ProjectId("p1"),
+                title = "New thread",
+                modelSelection = ModelSelection(instanceId = "anthropic", model = "claude-fable-5"),
+                runtimeMode = RuntimeMode.AUTO,
+                interactionMode = InteractionMode.DEFAULT,
+                createdAt = "2026-08-15T10:00:00.000Z",
+            ),
+        ).jsonObject
+
+        assertEquals("thread.create", encoded["type"]?.jsonPrimitive?.content)
+        assertTrue("branch" in encoded)
+        assertEquals(JsonNull, encoded["branch"])
+        assertTrue("worktreePath" in encoded)
+        assertEquals(JsonNull, encoded["worktreePath"])
+    }
+
+    @Test
+    fun `turn start with a create-thread bootstrap encodes titleSeed and explicit nulls`() {
+        val encoded = json.encodeToJsonElement(
+            ClientOrchestrationCommand.serializer(),
+            ThreadTurnStartCommand(
+                commandId = "cmd-3",
+                threadId = ThreadId("t3"),
+                message = UserMessageInput(messageId = "msg-2", text = "fix the build"),
+                runtimeMode = RuntimeMode.AUTO,
+                interactionMode = InteractionMode.DEFAULT,
+                createdAt = "2026-08-15T10:00:00.000Z",
+                modelSelection = ModelSelection(instanceId = "anthropic", model = "claude-fable-5"),
+                titleSeed = "fix the build",
+                bootstrap = ThreadTurnStartBootstrap(
+                    createThread = ThreadTurnStartBootstrapCreateThread(
+                        projectId = ProjectId("p1"),
+                        title = "fix the build",
+                        modelSelection = ModelSelection(
+                            instanceId = "anthropic",
+                            model = "claude-fable-5",
+                        ),
+                        runtimeMode = RuntimeMode.AUTO,
+                        interactionMode = InteractionMode.DEFAULT,
+                        createdAt = "2026-08-15T10:00:00.000Z",
+                    ),
+                ),
+            ),
+        ).jsonObject
+
+        assertEquals("fix the build", encoded["titleSeed"]?.jsonPrimitive?.content)
+
+        val createThread = encoded["bootstrap"]!!.jsonObject["createThread"]!!.jsonObject
+        assertEquals("p1", createThread["projectId"]?.jsonPrimitive?.content)
+        // `NullOr` in the contract: keys required even when null.
+        assertEquals(JsonNull, createThread["branch"])
+        assertEquals(JsonNull, createThread["worktreePath"])
     }
 
     @Test

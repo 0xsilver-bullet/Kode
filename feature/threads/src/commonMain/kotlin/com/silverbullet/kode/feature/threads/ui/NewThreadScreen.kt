@@ -63,7 +63,7 @@ fun NewThreadRoute(
     NewThreadScreen(
         uiState = uiState,
         onProjectSelected = viewModel::onProjectSelected,
-        onTitleChanged = viewModel::onTitleChanged,
+        onMessageChanged = viewModel::onMessageChanged,
         onModelSelected = { option -> viewModel.onModelSelected(option) },
         onModelOptionSelected = viewModel::onModelOptionSelected,
         onRuntimeModeSelected = viewModel::onRuntimeModeSelected,
@@ -77,7 +77,7 @@ fun NewThreadRoute(
 fun NewThreadScreen(
     uiState: NewThreadUiState,
     onProjectSelected: (ProjectId) -> Unit,
-    onTitleChanged: (String) -> Unit,
+    onMessageChanged: (String) -> Unit,
     onModelSelected: (com.silverbullet.kode.feature.threads.domain.ModelOption) -> Unit,
     onModelOptionSelected: (String, JsonPrimitive) -> Unit,
     onRuntimeModeSelected: (String) -> Unit,
@@ -109,14 +109,16 @@ fun NewThreadScreen(
                 )
             }
 
+            // No title field: as in T3 Code's mobile client, the title is
+            // derived from this first message and refined server-side.
             OutlinedTextField(
-                value = uiState.title,
-                onValueChange = onTitleChanged,
+                value = uiState.message,
+                onValueChange = onMessageChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Title") },
-                placeholder = { Text("What is this thread about?") },
+                label = { Text("First message") },
+                placeholder = { Text("What should the agent do?") },
                 textStyle = MaterialTheme.typography.bodyLarge,
-                singleLine = true,
+                minLines = 3,
             )
 
             SettingRow(
@@ -158,7 +160,7 @@ fun NewThreadScreen(
                     color = MaterialTheme.colorScheme.onPrimary,
                 )
             }
-            Text("Create thread")
+            Text("Start thread")
         }
     }
 

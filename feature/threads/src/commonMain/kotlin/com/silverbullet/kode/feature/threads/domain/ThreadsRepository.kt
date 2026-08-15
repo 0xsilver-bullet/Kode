@@ -9,11 +9,12 @@ import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ModelSelection
 import com.silverbullet.kode.core.model.ProjectId
 import com.silverbullet.kode.core.model.ThreadApprovalRespondCommand
-import com.silverbullet.kode.core.model.ThreadCreateCommand
 import com.silverbullet.kode.core.model.ThreadInteractionModeSetCommand
 import com.silverbullet.kode.core.model.ThreadMetaUpdateCommand
 import com.silverbullet.kode.core.model.ThreadRuntimeModeSetCommand
 import com.silverbullet.kode.core.model.ThreadTurnInterruptCommand
+import com.silverbullet.kode.core.model.ThreadTurnStartBootstrap
+import com.silverbullet.kode.core.model.ThreadTurnStartBootstrapCreateThread
 import com.silverbullet.kode.core.model.ThreadTurnStartCommand
 import com.silverbullet.kode.core.model.ThreadUserInputRespondCommand
 import com.silverbullet.kode.core.model.UserMessageInput
@@ -117,15 +118,19 @@ class ThreadsRepository(
         supervisor.serverConfig.map { it?.providers.orEmpty().toCatalog() }
 
     /**
-     * Creates a thread and returns its id.
+     * Creates a thread and runs [text] as its first turn, returning the id.
      *
-     * The id is generated here rather than by the server: `thread.create`
-     * carries it, so the caller can navigate to the thread without waiting for
-     * the shell subscription to catch up.
+     * This mirrors T3 Code's mobile client: one `thread.turn.start` carrying a
+     * `bootstrap.createThread` payload, with the title derived from the prompt
+     * and passed as `titleSeed` so the server can regenerate a better one.
+     *
+     * The id is generated here rather than by the server: the command carries
+     * it, so the caller can navigate to the thread without waiting for the
+     * shell subscription to catch up.
      */
-    suspend fun createThread(
+    suspend fun startThread(
         projectId: ProjectId,
-        title: String,
+        text: String,
         modelSelection: ModelSelection,
         runtimeMode: String,
         interactionMode: String,
@@ -133,17 +138,33 @@ class ThreadsRepository(
         val client = supervisor.session.value
             ?: error("Not connected to an environment.")
         val threadId = ThreadId(idGenerator.newId())
+        val title = deriveThreadTitleFromPrompt(text)
+        val createdAt = timeProvider.nowIso()
 
         client.dispatchCommand(
-            ThreadCreateCommand(
+            ThreadTurnStartCommand(
                 commandId = idGenerator.newId(),
                 threadId = threadId,
-                projectId = projectId,
-                title = title,
+                message = UserMessageInput(
+                    messageId = idGenerator.newId(),
+                    text = text,
+                    role = MessageRole.USER,
+                ),
                 modelSelection = modelSelection,
+                titleSeed = title,
                 runtimeMode = runtimeMode,
                 interactionMode = interactionMode,
-                createdAt = timeProvider.nowIso(),
+                bootstrap = ThreadTurnStartBootstrap(
+                    createThread = ThreadTurnStartBootstrapCreateThread(
+                        projectId = projectId,
+                        title = title,
+                        modelSelection = modelSelection,
+                        runtimeMode = runtimeMode,
+                        interactionMode = interactionMode,
+                        createdAt = createdAt,
+                    ),
+                ),
+                createdAt = createdAt,
             ) as ClientOrchestrationCommand,
         )
         threadId

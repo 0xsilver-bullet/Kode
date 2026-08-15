@@ -24,8 +24,11 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * Composes a new thread: which project it belongs to, and how the agent is
- * configured before the first turn.
+ * Composes a new thread: which project it belongs to, how the agent is
+ * configured, and the first message that starts it.
+ *
+ * There is no title field — as in T3 Code's mobile client, the title is
+ * derived from the first message and refined server-side from `titleSeed`.
  *
  * Model choice is unconstrained here — that is the whole point of starting a
  * new thread, and it is what `requiresNewThreadForModelChange` sends you here
@@ -52,7 +55,7 @@ class NewThreadViewModel(
                 projects = projects,
                 catalog = catalog,
                 projectId = projectId,
-                title = current.title,
+                message = current.message,
                 modelSelection = selection,
                 selectedModel = catalog.optionFor(selection),
                 optionDescriptors = catalog.optionFor(selection)?.model
@@ -74,8 +77,8 @@ class NewThreadViewModel(
         form.value = form.value.copy(projectId = projectId, error = null)
     }
 
-    fun onTitleChanged(value: String) {
-        form.value = form.value.copy(title = value, error = null)
+    fun onMessageChanged(value: String) {
+        form.value = form.value.copy(message = value, error = null)
     }
 
     fun onModelSelected(option: ModelOption) {
@@ -99,7 +102,7 @@ class NewThreadViewModel(
     }
 
     /**
-     * Creates the thread.
+     * Creates the thread by starting its first turn.
      *
      * On success [NewThreadUiState.createdThreadId] is set and the host
      * navigates to it — the thread exists server-side before the shell
@@ -113,7 +116,7 @@ class NewThreadViewModel(
         val problem = when {
             projectId == null -> "Choose a project."
             selection == null -> "No models are available on this environment."
-            state.title.isBlank() -> "Give the thread a title."
+            state.message.isBlank() -> "Write a first message."
             else -> null
         }
         if (problem != null) {
@@ -125,9 +128,9 @@ class NewThreadViewModel(
         viewModelScope.launch {
             form.value = form.value.copy(isSubmitting = true, error = null)
 
-            val result = repository.createThread(
+            val result = repository.startThread(
                 projectId = projectId!!,
-                title = state.title.trim(),
+                text = state.message,
                 modelSelection = selection!!,
                 runtimeMode = state.runtimeMode,
                 interactionMode = state.interactionMode,
@@ -158,7 +161,7 @@ class NewThreadViewModel(
 @Immutable
 private data class NewThreadForm(
     val projectId: ProjectId? = null,
-    val title: String = "",
+    val message: String = "",
     val modelSelection: ModelSelection? = null,
     val runtimeMode: String = RuntimeMode.APPROVAL_REQUIRED,
     val interactionMode: String = InteractionMode.DEFAULT,
@@ -172,7 +175,7 @@ data class NewThreadUiState(
     val projects: List<OrchestrationProjectShell> = emptyList(),
     val catalog: ProviderCatalog = ProviderCatalog(),
     val projectId: ProjectId? = null,
-    val title: String = "",
+    val message: String = "",
     val modelSelection: ModelSelection? = null,
     val selectedModel: ModelOption? = null,
     val optionDescriptors: List<ProviderOptionDescriptor> = emptyList(),
@@ -183,7 +186,7 @@ data class NewThreadUiState(
     val createdThreadId: ThreadId? = null,
 ) {
     val canCreate: Boolean
-        get() = projectId != null && modelSelection != null && title.isNotBlank() && !isSubmitting
+        get() = projectId != null && modelSelection != null && message.isNotBlank() && !isSubmitting
 
     val hasProjects: Boolean get() = projects.isNotEmpty()
 }
