@@ -1,7 +1,7 @@
 package com.silverbullet.kode.feature.connection.domain
 
+import com.silverbullet.kode.core.datastore.EnvironmentCatalogStore
 import com.silverbullet.kode.core.datastore.EnvironmentRecord
-import com.silverbullet.kode.core.datastore.EnvironmentStore
 import com.silverbullet.kode.core.network.ClientPresentation
 import com.silverbullet.kode.core.network.EnvironmentAuthApi
 import com.silverbullet.kode.core.network.PairingLinkResolver
@@ -18,7 +18,7 @@ import com.silverbullet.kode.core.network.PairingTarget
  */
 class PairEnvironmentUseCase(
     private val authApi: EnvironmentAuthApi,
-    private val environmentStore: EnvironmentStore,
+    private val environmentStore: EnvironmentCatalogStore,
     private val clientPresentation: ClientPresentation = ClientPresentation.Default,
 ) {
 
@@ -47,6 +47,9 @@ class PairEnvironmentUseCase(
                 httpBaseUrl = target.httpBaseUrl,
                 wsBaseUrl = target.wsBaseUrl,
                 accessToken = access.accessToken,
-            ).also { environmentStore.save(it) }
+            // Upsert: re-pairing an environment that is already in the catalog
+            // replaces its record — same rule as T3 Code, where a bearer
+            // registration is keyed by environment id.
+            ).also { environmentStore.upsert(it) }
         }
 }

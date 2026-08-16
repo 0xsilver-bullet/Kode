@@ -56,6 +56,7 @@ import com.silverbullet.kode.core.designsystem.KodeStreamingMarkdown
 import com.silverbullet.kode.core.designsystem.KodeTheme
 import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.OrchestrationMessage
+import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.feature.threads.domain.ActivityIcon
 import com.silverbullet.kode.feature.threads.domain.ActivityPresentation
@@ -98,9 +99,10 @@ internal val ToolDetailStyle = TextStyle(
 
 @Composable
 fun ThreadDetailRoute(
+    environmentId: EnvironmentId,
     threadId: ThreadId,
     modifier: Modifier = Modifier,
-    viewModel: ThreadDetailViewModel = koinViewModel { parametersOf(threadId) },
+    viewModel: ThreadDetailViewModel = koinViewModel { parametersOf(environmentId, threadId) },
 ) {
     val feed by viewModel.feed.collectAsStateWithLifecycle()
     val interrupting by viewModel.interrupting.collectAsStateWithLifecycle()

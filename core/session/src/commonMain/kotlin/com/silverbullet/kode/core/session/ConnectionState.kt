@@ -12,9 +12,6 @@ import com.silverbullet.kode.core.model.ExecutionEnvironmentDescriptor
  */
 sealed interface ConnectionState {
 
-    /** No environment has been paired yet. */
-    data object Unpaired : ConnectionState
-
     /** First attempt for this environment. */
     data object Connecting : ConnectionState
 

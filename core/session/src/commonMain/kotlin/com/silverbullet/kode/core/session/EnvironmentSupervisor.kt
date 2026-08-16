@@ -6,7 +6,6 @@ import com.silverbullet.kode.core.common.AppLifecycleMonitor
 import com.silverbullet.kode.core.common.NetworkMonitor
 import com.silverbullet.kode.core.common.NoOpAppLifecycleMonitor
 import com.silverbullet.kode.core.datastore.EnvironmentRecord
-import com.silverbullet.kode.core.datastore.EnvironmentStore
 import com.silverbullet.kode.core.network.EnvironmentAuthApi
 import com.silverbullet.kode.core.network.EnvironmentAuthException
 import com.silverbullet.kode.core.network.T3EnvironmentClient
@@ -27,8 +26,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -49,14 +46,14 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  - an explicit retry interrupts backoff immediately.
  */
 class EnvironmentSupervisor(
+    private val record: EnvironmentRecord,
     private val authApi: EnvironmentAuthApi,
     private val transport: WebSocketRpcTransport,
-    private val environmentStore: EnvironmentStore,
     private val networkMonitor: NetworkMonitor = AlwaysOnlineNetworkMonitor(),
     private val appLifecycleMonitor: AppLifecycleMonitor = NoOpAppLifecycleMonitor(),
     private val timeSource: TimeSource = TimeSource.Monotonic,
 ) {
-    private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Unpaired)
+    private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Connecting)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
     private val _session = MutableStateFlow<T3EnvironmentClient?>(null)
@@ -89,16 +86,16 @@ class EnvironmentSupervisor(
     private var connectedAt: TimeMark? = null
 
     /**
-     * Runs the supervisor for the lifetime of [scope].
-     *
-     * `collectLatest` is load-bearing: re-pairing emits a new record, which must
-     * cancel the in-flight session rather than queue behind it.
+     * Runs this environment's connection until the calling coroutine is
+     * cancelled. Cancellation is the only exit: the caller — the fleet — cancels
+     * it when the environment is removed or its record changes, which is what
+     * used to be `collectLatest` over the single stored record.
      */
-    fun start(scope: CoroutineScope) {
-        scope.launch {
+    suspend fun run(): Nothing = coroutineScope {
+        launch {
             networkMonitor.isOnline.collect { online.value = it }
         }
-        scope.launch {
+        launch {
             appLifecycleMonitor.activations.collect { activation ->
                 wakeups.trySend(
                     when (activation) {
@@ -108,17 +105,7 @@ class EnvironmentSupervisor(
                 )
             }
         }
-        scope.launch {
-            environmentStore.environment
-                .distinctUntilChanged()
-                .collectLatest { record ->
-                    if (record == null) {
-                        _state.value = ConnectionState.Unpaired
-                    } else {
-                        superviseEnvironment(record)
-                    }
-                }
-        }
+        superviseEnvironment(record)
     }
 
     /** Interrupts backoff, or a blocked state, and attempts immediately. */
@@ -139,7 +126,7 @@ class EnvironmentSupervisor(
         )
     }
 
-    private suspend fun superviseEnvironment(record: EnvironmentRecord) {
+    private suspend fun superviseEnvironment(record: EnvironmentRecord): Nothing {
         var attempt = 0
 
         while (true) {

@@ -23,16 +23,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.silverbullet.kode.core.designsystem.KodeIcons
 import com.silverbullet.kode.core.designsystem.KodeTheme
+import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.session.ConnectionState
-import com.silverbullet.kode.core.session.EnvironmentSupervisor
+import com.silverbullet.kode.core.session.EnvironmentFleet
+import com.silverbullet.kode.feature.connection.ui.AddEnvironmentRoute
 import com.silverbullet.kode.feature.connection.ui.ConnectionRoute
+import com.silverbullet.kode.feature.connection.ui.EnvironmentsRoute
+import com.silverbullet.kode.feature.connection.ui.SettingsRoute
 import com.silverbullet.kode.feature.threads.ui.NewThreadRoute
 import com.silverbullet.kode.feature.threads.ui.ThreadDetailRoute
 import com.silverbullet.kode.feature.threads.ui.ThreadListRoute
@@ -44,10 +49,19 @@ import org.koin.compose.koinInject
 private data object ThreadListDestination
 
 @Serializable
-private data class ThreadDetailDestination(val threadId: String)
+private data class ThreadDetailDestination(val environmentId: String, val threadId: String)
 
 @Serializable
 private data object NewThreadDestination
+
+@Serializable
+private data object SettingsDestination
+
+@Serializable
+private data object SettingsEnvironmentsDestination
+
+@Serializable
+private data object AddEnvironmentDestination
 
 /**
  * The app shell.
@@ -58,23 +72,29 @@ private data object NewThreadDestination
  * background. Insets are applied per destination, by the `Scaffold` that owns
  * each screen.
  *
- * Pairing is not a navigation destination: it replaces the whole UI while there
- * is no environment, because nothing else in the app can function without one.
+ * Onboarding is not a navigation destination: it replaces the whole UI while
+ * the environment catalog is empty, because nothing else in the app can
+ * function without one. While the catalog is still being read from disk
+ * (`null`), neither is shown — flashing the pairing form at every launch would
+ * be worse than a blank frame.
  */
 @Composable
 @Preview
 fun App() {
     KodeTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
-            val supervisor = koinInject<EnvironmentSupervisor>()
-            val connection by supervisor.state.collectAsStateWithLifecycle()
+            val fleet = koinInject<EnvironmentFleet>()
+            val environments by fleet.environments.collectAsStateWithLifecycle()
 
-            if (connection is ConnectionState.Unpaired) {
-                Scaffold(contentWindowInsets = WindowInsets.safeDrawing) { padding ->
-                    ConnectionRoute(modifier = Modifier.fillMaxSize().padding(padding))
-                }
-            } else {
-                KodeNavHost()
+            when {
+                environments == null -> Unit
+
+                environments.orEmpty().isEmpty() ->
+                    Scaffold(contentWindowInsets = WindowInsets.safeDrawing) { padding ->
+                        ConnectionRoute(modifier = Modifier.fillMaxSize().padding(padding))
+                    }
+
+                else -> KodeNavHost()
             }
         }
     }
@@ -95,7 +115,12 @@ private fun KodeNavHost() {
                 topBar = {
                     TopAppBar(
                         title = { Text("Threads") },
-                        actions = { ConnectionBadge() },
+                        actions = {
+                            ConnectionBadge()
+                            IconButton(onClick = { navController.navigate(SettingsDestination) }) {
+                                Icon(KodeIcons.Gear, contentDescription = "Settings")
+                            }
+                        },
                         windowInsets = TopAppBarDefaults.windowInsets,
                     )
                 },
@@ -113,34 +138,26 @@ private fun KodeNavHost() {
                     .only(WindowInsetsSides.Horizontal),
             ) { padding ->
                 ThreadListRoute(
-                    onOpenThread = { navController.navigate(ThreadDetailDestination(it.value)) },
+                    onOpenThread = { environmentId, threadId ->
+                        navController.navigate(
+                            ThreadDetailDestination(environmentId.value, threadId.value),
+                        )
+                    },
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
             }
         }
 
         composable<NewThreadDestination> {
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = { Text("New thread") },
-                        navigationIcon = {
-                            IconButton(onClick = { navController.popBackStack() }) {
-                                Icon(KodeIcons.ChevronDown, contentDescription = "Back")
-                            }
-                        },
-                        windowInsets = TopAppBarDefaults.windowInsets,
-                    )
-                },
-                contentWindowInsets = WindowInsets.safeDrawing
-                    .only(WindowInsetsSides.Horizontal),
-            ) { padding ->
+            SubScreenScaffold(navController = navController, title = "New thread") { padding ->
                 NewThreadRoute(
-                    onCreated = { threadId ->
+                    onCreated = { environmentId, threadId ->
                         // Replace rather than stack: returning from the thread
                         // should land on the list, not back on a spent form.
                         navController.popBackStack()
-                        navController.navigate(ThreadDetailDestination(threadId.value))
+                        navController.navigate(
+                            ThreadDetailDestination(environmentId.value, threadId.value),
+                        )
                     },
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
@@ -148,7 +165,7 @@ private fun KodeNavHost() {
         }
 
         composable<ThreadDetailDestination> { entry ->
-            val threadId = ThreadId(entry.toRoute<ThreadDetailDestination>().threadId)
+            val route = entry.toRoute<ThreadDetailDestination>()
             Scaffold(
                 topBar = {
                     TopAppBar(
@@ -163,12 +180,77 @@ private fun KodeNavHost() {
                     .only(WindowInsetsSides.Horizontal),
             ) { padding ->
                 ThreadDetailRoute(
-                    threadId = threadId,
+                    environmentId = EnvironmentId(route.environmentId),
+                    threadId = ThreadId(route.threadId),
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                )
+            }
+        }
+
+        composable<SettingsDestination> {
+            SubScreenScaffold(navController = navController, title = "Settings") { padding ->
+                SettingsRoute(
+                    onOpenEnvironments = {
+                        navController.navigate(SettingsEnvironmentsDestination)
+                    },
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                )
+            }
+        }
+
+        composable<SettingsEnvironmentsDestination> {
+            SubScreenScaffold(
+                navController = navController,
+                title = "Environments",
+                actions = {
+                    IconButton(
+                        onClick = { navController.navigate(AddEnvironmentDestination) },
+                    ) {
+                        Icon(KodeIcons.Plus, contentDescription = "Add environment")
+                    }
+                },
+            ) { padding ->
+                EnvironmentsRoute(modifier = Modifier.fillMaxSize().padding(padding))
+            }
+        }
+
+        composable<AddEnvironmentDestination> {
+            SubScreenScaffold(navController = navController, title = "Add Environment") { padding ->
+                AddEnvironmentRoute(
+                    onAdded = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
             }
         }
     }
+}
+
+/** The shared chrome for pushed screens: a titled bar with a back affordance. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SubScreenScaffold(
+    navController: NavHostController,
+    title: String,
+    actions: @Composable () -> Unit = {},
+    content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(KodeIcons.ChevronDown, contentDescription = "Back")
+                    }
+                },
+                actions = { actions() },
+                windowInsets = TopAppBarDefaults.windowInsets,
+            )
+        },
+        contentWindowInsets = WindowInsets.safeDrawing
+            .only(WindowInsetsSides.Horizontal),
+        content = content,
+    )
 }
 
 /**
@@ -181,15 +263,30 @@ private fun ConnectionBadge() {
     // every connection change recomposed the whole NavHost, and the captured
     // value could go stale because navigation-compose remembers the graph
     // independently of the builder lambda.
-    val supervisor = koinInject<EnvironmentSupervisor>()
-    val connection by supervisor.state.collectAsStateWithLifecycle()
+    val fleet = koinInject<EnvironmentFleet>()
+    val environments by fleet.environments.collectAsStateWithLifecycle()
+    val handles = environments.orEmpty()
+    if (handles.isEmpty()) return
 
-    val label = when (connection) {
-        ConnectionState.Connecting -> "Connecting…"
-        ConnectionState.Offline -> "Offline"
-        is ConnectionState.Reconnecting -> "Reconnecting…"
-        is ConnectionState.Blocked -> "Disconnected"
-        is ConnectionState.Connected, ConnectionState.Unpaired -> return
+    // Aggregated across the fleet: all good says nothing, anything else says
+    // how much of the fleet is reachable.
+    val states = handles.map { handle ->
+        val state by handle.state.collectAsStateWithLifecycle()
+        state
+    }
+    val connected = states.count { it is ConnectionState.Connected }
+    if (connected == handles.size) return
+
+    val label = if (handles.size == 1) {
+        when (states.single()) {
+            ConnectionState.Connecting -> "Connecting…"
+            ConnectionState.Offline -> "Offline"
+            is ConnectionState.Reconnecting -> "Reconnecting…"
+            is ConnectionState.Blocked -> "Disconnected"
+            is ConnectionState.Connected -> return
+        }
+    } else {
+        "$connected/${handles.size} connected"
     }
 
     Text(

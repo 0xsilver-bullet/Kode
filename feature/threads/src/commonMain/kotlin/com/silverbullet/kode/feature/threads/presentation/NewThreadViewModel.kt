@@ -3,6 +3,7 @@ package com.silverbullet.kode.feature.threads.presentation
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.InteractionMode
 import com.silverbullet.kode.core.model.ModelSelection
 import com.silverbullet.kode.core.model.OrchestrationProjectShell
@@ -15,43 +16,76 @@ import com.silverbullet.kode.feature.threads.domain.ProviderCatalog
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
 import com.silverbullet.kode.feature.threads.domain.applyOptionSelection
 import com.silverbullet.kode.feature.threads.domain.resolveOptionDescriptors
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * Composes a new thread: which project it belongs to, how the agent is
- * configured, and the first message that starts it.
+ * Composes a new thread: which environment and project it belongs to, how the
+ * agent is configured, and the first message that starts it.
  *
  * There is no title field — as in T3 Code's mobile client, the title is
  * derived from the first message and refined server-side from `titleSeed`.
  *
- * Model choice is unconstrained here — that is the whole point of starting a
- * new thread, and it is what `requiresNewThreadForModelChange` sends you here
- * for.
+ * The environment defaults to the first connected one; picking another resets
+ * project and model, because both are meaningless off their own server.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class NewThreadViewModel(
     private val repository: ThreadsRepository,
 ) : ViewModel() {
 
     private val form = MutableStateFlow(NewThreadForm())
 
+    /**
+     * The environment the form is composing against: the explicit choice while
+     * it still exists, else the first connected environment, else the first
+     * saved one — the same fallback ladder T3's new-task flow applies.
+     */
+    private val effectiveEnvironmentId = combine(repository.shells, form) { shells, current ->
+        current.environmentId?.takeIf { id -> shells.any { it.environmentId == id } }
+            ?: shells.firstOrNull { it.isConnected }?.environmentId
+            ?: shells.firstOrNull()?.environmentId
+    }.distinctUntilChanged()
+
+    private val catalog = effectiveEnvironmentId.flatMapLatest { environmentId ->
+        if (environmentId == null) flowOf(ProviderCatalog()) else repository.catalog(environmentId)
+    }
+
     val uiState: StateFlow<NewThreadUiState> =
-        combine(repository.shell, repository.catalog, form) { shell, catalog, current ->
-            val projects = shell.projects.values.sortedBy { it.title }
+        combine(
+            repository.shells,
+            effectiveEnvironmentId,
+            catalog,
+            form,
+        ) { shells, environmentId, catalog, current ->
+            val environment = shells.firstOrNull { it.environmentId == environmentId }
+            val projects = environment?.shell?.projects?.values.orEmpty().sortedBy { it.title }
 
             // Defaults are resolved against live data rather than stored, so a
             // catalogue that arrives after the screen opens still lands.
-            val projectId = current.projectId
+            val projectId = current.projectId?.takeIf { id -> projects.any { it.id == id } }
                 ?: projects.firstOrNull()?.id
             val selection = current.modelSelection
                 ?: catalog.defaultSelection()
 
             NewThreadUiState(
+                environments = shells.map {
+                    EnvironmentOption(
+                        environmentId = it.environmentId,
+                        label = it.label,
+                        isConnected = it.isConnected,
+                    )
+                },
+                environmentId = environmentId,
                 projects = projects,
                 catalog = catalog,
                 projectId = projectId,
@@ -65,13 +99,23 @@ class NewThreadViewModel(
                 interactionMode = current.interactionMode,
                 isSubmitting = current.isSubmitting,
                 error = current.error,
-                createdThreadId = current.createdThreadId,
+                created = current.created,
             )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
             initialValue = NewThreadUiState(),
         )
+
+    /** Project and model reset: both belong to the machine that hosts them. */
+    fun onEnvironmentSelected(environmentId: EnvironmentId) {
+        form.value = form.value.copy(
+            environmentId = environmentId,
+            projectId = null,
+            modelSelection = null,
+            error = null,
+        )
+    }
 
     fun onProjectSelected(projectId: ProjectId) {
         form.value = form.value.copy(projectId = projectId, error = null)
@@ -104,16 +148,18 @@ class NewThreadViewModel(
     /**
      * Creates the thread by starting its first turn.
      *
-     * On success [NewThreadUiState.createdThreadId] is set and the host
-     * navigates to it — the thread exists server-side before the shell
-     * subscription reports it, so navigation must not wait on the list.
+     * On success [NewThreadUiState.created] is set and the host navigates to
+     * it — the thread exists server-side before the shell subscription reports
+     * it, so navigation must not wait on the list.
      */
     fun create() {
         val state = uiState.value
+        val environmentId = state.environmentId
         val projectId = state.projectId
         val selection = state.modelSelection
 
         val problem = when {
+            environmentId == null -> "Connect an environment first."
             projectId == null -> "Choose a project."
             selection == null -> "No models are available on this environment."
             state.message.isBlank() -> "Write a first message."
@@ -129,6 +175,7 @@ class NewThreadViewModel(
             form.value = form.value.copy(isSubmitting = true, error = null)
 
             val result = repository.startThread(
+                environmentId = environmentId!!,
                 projectId = projectId!!,
                 text = state.message,
                 modelSelection = selection!!,
@@ -137,7 +184,12 @@ class NewThreadViewModel(
             )
 
             form.value = result.fold(
-                onSuccess = { form.value.copy(isSubmitting = false, createdThreadId = it) },
+                onSuccess = {
+                    form.value.copy(
+                        isSubmitting = false,
+                        created = CreatedThread(environmentId, it),
+                    )
+                },
                 onFailure = {
                     form.value.copy(
                         isSubmitting = false,
@@ -150,7 +202,7 @@ class NewThreadViewModel(
 
     /** Clears the navigation signal once the host has consumed it. */
     fun onNavigated() {
-        form.value = form.value.copy(createdThreadId = null)
+        form.value = form.value.copy(created = null)
     }
 
     private companion object {
@@ -160,6 +212,7 @@ class NewThreadViewModel(
 
 @Immutable
 private data class NewThreadForm(
+    val environmentId: EnvironmentId? = null,
     val projectId: ProjectId? = null,
     val message: String = "",
     val modelSelection: ModelSelection? = null,
@@ -167,11 +220,24 @@ private data class NewThreadForm(
     val interactionMode: String = InteractionMode.DEFAULT,
     val isSubmitting: Boolean = false,
     val error: String? = null,
-    val createdThreadId: ThreadId? = null,
+    val created: CreatedThread? = null,
+)
+
+/** Where the created thread lives, so the host can navigate to it. */
+@Immutable
+data class CreatedThread(val environmentId: EnvironmentId, val threadId: ThreadId)
+
+@Immutable
+data class EnvironmentOption(
+    val environmentId: EnvironmentId,
+    val label: String,
+    val isConnected: Boolean,
 )
 
 @Immutable
 data class NewThreadUiState(
+    val environments: List<EnvironmentOption> = emptyList(),
+    val environmentId: EnvironmentId? = null,
     val projects: List<OrchestrationProjectShell> = emptyList(),
     val catalog: ProviderCatalog = ProviderCatalog(),
     val projectId: ProjectId? = null,
@@ -183,10 +249,18 @@ data class NewThreadUiState(
     val interactionMode: String = InteractionMode.DEFAULT,
     val isSubmitting: Boolean = false,
     val error: String? = null,
-    val createdThreadId: ThreadId? = null,
+    val created: CreatedThread? = null,
 ) {
     val canCreate: Boolean
-        get() = projectId != null && modelSelection != null && message.isNotBlank() && !isSubmitting
+        get() = environmentId != null && projectId != null && modelSelection != null &&
+            message.isNotBlank() && !isSubmitting
 
     val hasProjects: Boolean get() = projects.isNotEmpty()
+
+    /** T3 shows the environment control as static until there is a choice. */
+    val canPickEnvironment: Boolean get() = environments.size > 1
+
+    val selectedEnvironmentLabel: String
+        get() = environments.firstOrNull { it.environmentId == environmentId }?.label
+            ?: "Environment"
 }

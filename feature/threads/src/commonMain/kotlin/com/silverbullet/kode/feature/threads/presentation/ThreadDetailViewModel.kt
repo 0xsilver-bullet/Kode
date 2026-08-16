@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.silverbullet.kode.core.common.DispatcherProvider
+import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.InteractionMode
 import com.silverbullet.kode.core.model.ModelSelection
 import com.silverbullet.kode.core.model.ProviderOptionDescriptor
@@ -37,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
 class ThreadDetailViewModel(
+    private val environmentId: EnvironmentId,
     private val threadId: ThreadId,
     private val repository: ThreadsRepository,
     dispatchers: DispatcherProvider,
@@ -68,7 +70,7 @@ class ThreadDetailViewModel(
      * action the agent is part-way through, and answering it is a single tap.
      */
     val approval: StateFlow<ApprovalUiState> =
-        combine(repository.thread(threadId), approvalForm) { detail, form ->
+        combine(repository.thread(environmentId, threadId), approvalForm) { detail, form ->
             val pending = detail.activeApproval
                 ?: return@combine ApprovalUiState()
 
@@ -91,7 +93,7 @@ class ThreadDetailViewModel(
      * streamed token must not recompose the card the user is typing into.
      */
     val userInput: StateFlow<UserInputUiState> =
-        combine(repository.thread(threadId), userInputForm) { detail, form ->
+        combine(repository.thread(environmentId, threadId), userInputForm) { detail, form ->
             val pending = detail.activeUserInput
                 ?: return@combine UserInputUiState()
 
@@ -122,9 +124,9 @@ class ThreadDetailViewModel(
      */
     val feed: StateFlow<ThreadFeedUiState> =
         combine(
-            repository.thread(threadId),
+            repository.thread(environmentId, threadId),
             expansion,
-            repository.catalog,
+            repository.catalog(environmentId),
         ) { detail, expanded, catalog ->
             val selection = detail.thread?.modelSelection
             val selected = catalog.optionFor(selection)
@@ -199,7 +201,7 @@ class ThreadDetailViewModel(
 
         viewModelScope.launch {
             _interrupting.value = true
-            val result = repository.interruptTurn(threadId = threadId, turnId = null)
+            val result = repository.interruptTurn(environmentId, threadId = threadId, turnId = null)
             _interrupting.value = false
 
             result.exceptionOrNull()?.let { failure ->
@@ -232,7 +234,7 @@ class ThreadDetailViewModel(
         }
 
         viewModelScope.launch {
-            repository.setModelSelection(threadId, option.selection)
+            repository.setModelSelection(environmentId, threadId, option.selection)
                 .exceptionOrNull()
                 ?.let { failure ->
                     _composer.value = _composer.value.copy(
@@ -254,7 +256,7 @@ class ThreadDetailViewModel(
         val next = state.optionDescriptors.applyOptionSelection(id, value) ?: return
 
         viewModelScope.launch {
-            repository.setModelSelection(threadId, selection.copy(options = next))
+            repository.setModelSelection(environmentId, threadId, selection.copy(options = next))
                 .exceptionOrNull()
                 ?.let { failure ->
                     _composer.value = _composer.value.copy(
@@ -266,7 +268,7 @@ class ThreadDetailViewModel(
 
     fun selectRuntimeMode(mode: String) {
         viewModelScope.launch {
-            repository.setRuntimeMode(threadId, mode).exceptionOrNull()?.let { failure ->
+            repository.setRuntimeMode(environmentId, threadId, mode).exceptionOrNull()?.let { failure ->
                 _composer.value = _composer.value.copy(
                     error = failure.message ?: "Could not change permissions.",
                 )
@@ -276,7 +278,7 @@ class ThreadDetailViewModel(
 
     fun selectInteractionMode(mode: String) {
         viewModelScope.launch {
-            repository.setInteractionMode(threadId, mode).exceptionOrNull()?.let { failure ->
+            repository.setInteractionMode(environmentId, threadId, mode).exceptionOrNull()?.let { failure ->
                 _composer.value = _composer.value.copy(
                     error = failure.message ?: "Could not change the mode.",
                 )
@@ -316,6 +318,7 @@ class ThreadDetailViewModel(
             )
 
             val result = repository.respondToApproval(
+                environmentId = environmentId,
                 threadId = threadId,
                 requestId = pending.requestId,
                 decision = decision,
@@ -387,6 +390,7 @@ class ThreadDetailViewModel(
             )
 
             val result = repository.respondToUserInput(
+                environmentId = environmentId,
                 threadId = threadId,
                 requestId = pending.requestId,
                 answers = state.answers.answers,
@@ -448,6 +452,7 @@ class ThreadDetailViewModel(
             _composer.value = _composer.value.copy(isSending = true, draft = "", error = null)
 
             val result = repository.sendMessage(
+                environmentId = environmentId,
                 threadId = threadId,
                 text = text,
                 runtimeMode = runtimeMode,

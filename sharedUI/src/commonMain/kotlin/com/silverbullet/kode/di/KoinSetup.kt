@@ -8,7 +8,8 @@ import com.silverbullet.kode.core.common.NetworkMonitor
 import com.silverbullet.kode.core.common.NoOpAppLifecycleMonitor
 import com.silverbullet.kode.core.datastore.di.dataStoreModule
 import com.silverbullet.kode.core.network.di.networkModule
-import com.silverbullet.kode.core.session.EnvironmentSupervisor
+import com.silverbullet.kode.core.session.EnvironmentFleet
+import com.silverbullet.kode.core.session.di.ApplicationScopeQualifier
 import com.silverbullet.kode.core.session.di.sessionModule
 import com.silverbullet.kode.feature.connection.di.connectionModule
 import com.silverbullet.kode.feature.threads.di.threadsModule
@@ -17,11 +18,7 @@ import kotlinx.coroutines.SupervisorJob
 import org.koin.core.KoinApplication
 import org.koin.core.context.startKoin
 import org.koin.core.module.Module
-import org.koin.core.qualifier.named
 import org.koin.dsl.module
-
-/** Qualifier for the process-lifetime coroutine scope. */
-val ApplicationScopeQualifier = named("kode.applicationScope")
 
 private val appModule = module {
     single<DispatcherProvider> { DefaultDispatcherProvider() }
@@ -37,13 +34,13 @@ private val appModule = module {
 }
 
 /**
- * Starts DI and the connection supervisor.
+ * Starts DI and the environment fleet.
  *
- * [platformModule] carries the few bindings only a platform can provide — today
- * just the DataStore path. Everything else is shared.
+ * [platformModule] carries the few bindings only a platform can provide — the
+ * DataStore path, monitors, the QR scanner. Everything else is shared.
  *
- * The supervisor is started here rather than from a screen because it owns the
- * app's single session: it must survive navigation and configuration changes.
+ * The fleet is started here rather than from a screen because it owns every
+ * session in the app: it must survive navigation and configuration changes.
  */
 fun initKoin(platformModule: Module): KoinApplication {
     val application = startKoin {
@@ -61,7 +58,7 @@ fun initKoin(platformModule: Module): KoinApplication {
     }
 
     val koin = application.koin
-    koin.get<EnvironmentSupervisor>().start(koin.get(ApplicationScopeQualifier))
+    koin.get<EnvironmentFleet>().start(koin.get(ApplicationScopeQualifier))
 
     return application
 }

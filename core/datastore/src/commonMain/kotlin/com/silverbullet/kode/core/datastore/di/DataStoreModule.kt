@@ -1,7 +1,7 @@
 package com.silverbullet.kode.core.datastore.di
 
-import com.silverbullet.kode.core.datastore.DataStoreEnvironmentStore
-import com.silverbullet.kode.core.datastore.EnvironmentStore
+import com.silverbullet.kode.core.datastore.DataStoreEnvironmentCatalogStore
+import com.silverbullet.kode.core.datastore.EnvironmentCatalogStore
 import com.silverbullet.kode.core.datastore.createKodeDataStore
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
@@ -14,5 +14,5 @@ val DataStorePathQualifier = named("kode.datastore.path")
 
 val dataStoreModule = module {
     single { createKodeDataStore { get(DataStorePathQualifier) } }
-    single<EnvironmentStore> { DataStoreEnvironmentStore(dataStore = get()) }
+    single<EnvironmentCatalogStore> { DataStoreEnvironmentCatalogStore(dataStore = get()) }
 }

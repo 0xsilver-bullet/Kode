@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.silverbullet.kode.core.designsystem.KodeIcons
 import com.silverbullet.kode.core.designsystem.KodeTheme
+import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.feature.threads.presentation.ThreadListItem
 import com.silverbullet.kode.feature.threads.presentation.ThreadListUiState
@@ -41,7 +42,7 @@ import org.koin.compose.viewmodel.koinViewModel
 
 @Composable
 fun ThreadListRoute(
-    onOpenThread: (ThreadId) -> Unit,
+    onOpenThread: (EnvironmentId, ThreadId) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ThreadListViewModel = koinViewModel(),
 ) {
@@ -57,7 +58,7 @@ fun ThreadListRoute(
 @Composable
 fun ThreadListScreen(
     uiState: ThreadListUiState,
-    onOpenThread: (ThreadId) -> Unit,
+    onOpenThread: (EnvironmentId, ThreadId) -> Unit,
     onToggleSettledShelf: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -104,7 +105,9 @@ fun ThreadListScreen(
                         is ThreadListItem.Thread -> {
                             ThreadRowItem(
                                 row = entry.row,
-                                onClick = { onOpenThread(entry.row.thread.id) },
+                                onClick = {
+                                    onOpenThread(entry.row.environmentId, entry.row.thread.id)
+                                },
                             )
                             HorizontalDivider()
                         }

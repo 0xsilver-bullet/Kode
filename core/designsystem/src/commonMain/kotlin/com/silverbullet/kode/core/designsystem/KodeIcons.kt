@@ -145,6 +145,66 @@ object KodeIcons {
             lineTo(10.5f, 21f); lineTo(19f, 10.5f); lineTo(12.5f, 10.5f); close()
         }
     }
+
+    /** Settings: a gear reduced to a hub and four spokes. */
+    val Gear: ImageVector by lazy {
+        strokeIcon("Gear") {
+            circle(12f, 12f, 3.5f)
+            circle(12f, 12f, 7.5f)
+            moveTo(12f, 2.5f); lineTo(12f, 6f)
+            moveTo(12f, 18f); lineTo(12f, 21.5f)
+            moveTo(2.5f, 12f); lineTo(6f, 12f)
+            moveTo(18f, 12f); lineTo(21.5f, 12f)
+        }
+    }
+
+    val Trash: ImageVector by lazy {
+        strokeIcon("Trash") {
+            moveTo(4f, 7f); lineTo(20f, 7f)
+            moveTo(9f, 7f); lineTo(9f, 4f); lineTo(15f, 4f); lineTo(15f, 7f)
+            moveTo(6f, 7f); lineTo(7f, 20f); lineTo(17f, 20f); lineTo(18f, 7f)
+            moveTo(10f, 10.5f); lineTo(10f, 16.5f)
+            moveTo(14f, 10.5f); lineTo(14f, 16.5f)
+        }
+    }
+
+    /** Reconnect: a circular arrow. */
+    val Refresh: ImageVector by lazy {
+        strokeIcon("Refresh") {
+            moveTo(19f, 12f)
+            arcTo(7f, 7f, 0f, true, true, 17f, 7f)
+            moveTo(17f, 3f); lineTo(17f, 7f); lineTo(21f, 7f)
+        }
+    }
+
+    val QrCode: ImageVector by lazy {
+        strokeIcon("QrCode") {
+            // Three finder squares plus a data dot.
+            moveTo(4f, 4f); lineTo(10f, 4f); lineTo(10f, 10f); lineTo(4f, 10f); close()
+            moveTo(14f, 4f); lineTo(20f, 4f); lineTo(20f, 10f); lineTo(14f, 10f); close()
+            moveTo(4f, 14f); lineTo(10f, 14f); lineTo(10f, 20f); lineTo(4f, 20f); close()
+            moveTo(14f, 14f); lineTo(16.5f, 14f)
+            moveTo(20f, 14f); lineTo(20f, 16.5f)
+            moveTo(14f, 17.5f); lineTo(14f, 20f); lineTo(17f, 20f)
+            moveTo(20f, 20f); lineTo(20f, 20.1f)
+        }
+    }
+
+    /** A desktop environment: monitor plus stand. */
+    val Monitor: ImageVector by lazy {
+        strokeIcon("Monitor") {
+            moveTo(3.5f, 5f); lineTo(20.5f, 5f); lineTo(20.5f, 16f); lineTo(3.5f, 16f); close()
+            moveTo(12f, 16f); lineTo(12f, 19.5f)
+            moveTo(8f, 19.5f); lineTo(16f, 19.5f)
+        }
+    }
+
+    /** Row disclosure: points into the target screen. */
+    val ChevronRight: ImageVector by lazy {
+        strokeIcon("ChevronRight") {
+            moveTo(9.5f, 6f); lineTo(15.5f, 12f); lineTo(9.5f, 18f)
+        }
+    }
 }
 
 /** Approximates a circle with two half arcs, which is all `PathBuilder` offers. */

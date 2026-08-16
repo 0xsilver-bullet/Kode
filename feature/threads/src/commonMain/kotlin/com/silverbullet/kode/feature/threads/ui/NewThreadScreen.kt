@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.silverbullet.kode.core.designsystem.KodeTheme
+import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ProjectId
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.feature.threads.domain.activeOptionLabels
@@ -40,13 +41,14 @@ import org.koin.compose.viewmodel.koinViewModel
 
 private sealed interface OpenPicker {
     data object None : OpenPicker
+    data object Environment : OpenPicker
     data object Project : OpenPicker
     data object Config : OpenPicker
 }
 
 @Composable
 fun NewThreadRoute(
-    onCreated: (ThreadId) -> Unit,
+    onCreated: (EnvironmentId, ThreadId) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: NewThreadViewModel = koinViewModel(),
 ) {
@@ -54,14 +56,15 @@ fun NewThreadRoute(
 
     // The thread exists server-side before the shell subscription reports it,
     // so navigation is driven by the command result, not by the list.
-    LaunchedEffect(uiState.createdThreadId) {
-        val created = uiState.createdThreadId ?: return@LaunchedEffect
+    LaunchedEffect(uiState.created) {
+        val created = uiState.created ?: return@LaunchedEffect
         viewModel.onNavigated()
-        onCreated(created)
+        onCreated(created.environmentId, created.threadId)
     }
 
     NewThreadScreen(
         uiState = uiState,
+        onEnvironmentSelected = viewModel::onEnvironmentSelected,
         onProjectSelected = viewModel::onProjectSelected,
         onMessageChanged = viewModel::onMessageChanged,
         onModelSelected = { option -> viewModel.onModelSelected(option) },
@@ -76,6 +79,7 @@ fun NewThreadRoute(
 @Composable
 fun NewThreadScreen(
     uiState: NewThreadUiState,
+    onEnvironmentSelected: (EnvironmentId) -> Unit,
     onProjectSelected: (ProjectId) -> Unit,
     onMessageChanged: (String) -> Unit,
     onModelSelected: (com.silverbullet.kode.feature.threads.domain.ModelOption) -> Unit,
@@ -120,6 +124,17 @@ fun NewThreadScreen(
                 textStyle = MaterialTheme.typography.bodyLarge,
                 minLines = 3,
             )
+
+            // "on <environment>": static until there is more than one, as in
+            // T3's composer control.
+            if (uiState.environments.isNotEmpty()) {
+                SettingRow(
+                    label = "Environment",
+                    value = uiState.selectedEnvironmentLabel,
+                    onClick = { picker = OpenPicker.Environment },
+                    enabled = uiState.canPickEnvironment,
+                )
+            }
 
             SettingRow(
                 label = "Project",
@@ -166,6 +181,23 @@ fun NewThreadScreen(
 
     when (picker) {
         OpenPicker.None -> Unit
+
+        OpenPicker.Environment -> PickerSheet(
+            title = "Environment",
+            entries = uiState.environments.map {
+                PickerEntry(
+                    id = it.environmentId.value,
+                    label = it.label,
+                    description = if (it.isConnected) "Connected" else "Not connected",
+                )
+            },
+            selectedId = uiState.environmentId?.value,
+            onSelect = {
+                onEnvironmentSelected(EnvironmentId(it))
+                picker = OpenPicker.None
+            },
+            onDismiss = { picker = OpenPicker.None },
+        )
 
         OpenPicker.Project -> PickerSheet(
             title = "Project",

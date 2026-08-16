@@ -6,8 +6,10 @@ import com.silverbullet.kode.core.datastore.di.DataStorePathQualifier
 import com.silverbullet.kode.core.common.AppLifecycleMonitor
 import com.silverbullet.kode.core.common.NetworkMonitor
 import com.silverbullet.kode.di.initKoin
+import com.silverbullet.kode.feature.connection.domain.QrCodeScanner
 import com.silverbullet.kode.platform.AndroidAppLifecycleMonitor
 import com.silverbullet.kode.platform.AndroidNetworkMonitor
+import com.silverbullet.kode.platform.AndroidQrCodeScanner
 import org.koin.dsl.module
 
 class KodeApplication : Application() {
@@ -24,6 +26,7 @@ class KodeApplication : Application() {
                 }
                 single<NetworkMonitor> { AndroidNetworkMonitor(applicationContext) }
                 single<AppLifecycleMonitor> { AndroidAppLifecycleMonitor() }
+                single<QrCodeScanner> { AndroidQrCodeScanner(applicationContext) }
             },
         )
     }

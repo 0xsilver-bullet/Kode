@@ -4,6 +4,7 @@ import com.silverbullet.kode.core.common.IdGenerator
 import com.silverbullet.kode.core.common.TimeProvider
 import com.silverbullet.kode.core.model.ClientOrchestrationCommand
 import com.silverbullet.kode.core.model.DispatchResult
+import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ModelSelection
@@ -19,52 +20,105 @@ import com.silverbullet.kode.core.model.ThreadTurnStartCommand
 import com.silverbullet.kode.core.model.ThreadUserInputRespondCommand
 import com.silverbullet.kode.core.model.UserMessageInput
 import com.silverbullet.kode.core.network.T3EnvironmentClient
-import kotlinx.serialization.json.JsonElement
-import com.silverbullet.kode.core.session.EnvironmentSupervisor
+import com.silverbullet.kode.core.session.ConnectionState
+import com.silverbullet.kode.core.session.EnvironmentFleet
+import com.silverbullet.kode.core.session.EnvironmentHandle
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.serialization.json.JsonElement
 
 /**
- * Live orchestration state, scoped to whichever session is currently up.
+ * One environment's slice of the merged thread list: who it is, whether it is
+ * reachable, and its projects/threads read model.
+ */
+data class EnvironmentShell(
+    val environmentId: EnvironmentId,
+    val label: String,
+    val connection: ConnectionState,
+    val shell: ShellState,
+) {
+    val isConnected: Boolean get() = connection is ConnectionState.Connected
+}
+
+/**
+ * Live orchestration state across every connected environment.
  *
- * `flatMapLatest` over [EnvironmentSupervisor.session] is what makes these
- * subscriptions durable across reconnects: when the supervisor swaps in a
- * replacement client, the old stream is cancelled and a fresh subscription
- * opens against the new socket. Nothing here retries — that would duplicate the
- * supervisor's job and fight its backoff.
+ * `flatMapLatest` over the fleet's sessions is what makes these subscriptions
+ * durable across reconnects: when a supervisor swaps in a replacement client,
+ * the old stream is cancelled and a fresh subscription opens against the new
+ * socket. Nothing here retries — that would duplicate the supervisors' job and
+ * fight their backoff.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ThreadsRepository(
-    private val supervisor: EnvironmentSupervisor,
+    private val fleet: EnvironmentFleet,
     private val idGenerator: IdGenerator,
     private val timeProvider: TimeProvider,
+    appScope: CoroutineScope,
 ) {
 
-    /** Projects and threads for the thread list. */
-    val shell: Flow<ShellState> = supervisor.session.flatMapLatest { client ->
-        if (client == null) {
-            // No session: report "not synchronized" rather than stale data.
-            flowOf(ShellState())
-        } else {
-            client.subscribeShell()
-                .scan(ShellState(status = SyncStatus.Synchronizing)) { state, item ->
-                    state.reduce(item)
-                }
-                .catchSubscriptionFailure { message ->
-                    ShellState(status = SyncStatus.Empty, error = message)
-                }
+    /**
+     * Every environment's projects and threads, in catalog order.
+     *
+     * Shared in [appScope] so the thread list and the new-thread form observe
+     * one shell subscription per environment instead of opening one each —
+     * with several environments connected, duplicate subscriptions would
+     * multiply socket traffic for identical data. `WhileSubscribed` still
+     * closes the streams shortly after the last screen leaves.
+     */
+    val shells: Flow<List<EnvironmentShell>> = fleet.environments
+        .flatMapLatest { handles ->
+            val list = handles.orEmpty()
+            if (list.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                combine(list.map { it.environmentShell() }) { it.toList() }
+            }
+        }
+        .shareIn(
+            scope = appScope,
+            started = SharingStarted.WhileSubscribed(SHELL_STOP_TIMEOUT_MILLIS),
+            replay = 1,
+        )
+
+    private fun EnvironmentHandle.environmentShell(): Flow<EnvironmentShell> {
+        val shellStates = session.flatMapLatest { client ->
+            if (client == null) {
+                // No session: report "not synchronized" rather than stale data.
+                flowOf(ShellState())
+            } else {
+                client.subscribeShell()
+                    .scan(ShellState(status = SyncStatus.Synchronizing)) { state, item ->
+                        state.reduce(item)
+                    }
+                    .catchSubscriptionFailure { message ->
+                        ShellState(status = SyncStatus.Empty, error = message)
+                    }
+            }
+        }
+        return combine(state, shellStates) { connection, shell ->
+            EnvironmentShell(
+                environmentId = record.environmentId,
+                label = record.label,
+                connection = connection,
+                shell = shell,
+            )
         }
     }
 
-    /** One thread's timeline. */
-    fun thread(threadId: ThreadId): Flow<ThreadDetailState> =
-        supervisor.session.flatMapLatest { client ->
+    /** One thread's timeline on one environment. */
+    fun thread(environmentId: EnvironmentId, threadId: ThreadId): Flow<ThreadDetailState> =
+        fleet.sessionFor(environmentId).flatMapLatest { client ->
             if (client == null) {
                 flowOf(ThreadDetailState())
             } else {
@@ -89,15 +143,13 @@ class ThreadsRepository(
      * approval this client cannot answer yet.
      */
     suspend fun sendMessage(
+        environmentId: EnvironmentId,
         threadId: ThreadId,
         text: String,
         runtimeMode: String,
         interactionMode: String,
     ): Result<DispatchResult> = runCatchingCancellable {
-        val client = supervisor.session.value
-            ?: error("Not connected to an environment.")
-
-        client.dispatchCommand(
+        connectedClient(environmentId).dispatchCommand(
             ThreadTurnStartCommand(
                 commandId = idGenerator.newId(),
                 threadId = threadId,
@@ -113,12 +165,13 @@ class ThreadsRepository(
         )
     }
 
-    /** The live provider catalogue, empty until a session reports its config. */
-    val catalog: Flow<ProviderCatalog> =
-        supervisor.serverConfig.map { it?.providers.orEmpty().toCatalog() }
+    /** One environment's provider catalogue, empty until its config arrives. */
+    fun catalog(environmentId: EnvironmentId): Flow<ProviderCatalog> =
+        fleet.serverConfigFor(environmentId).map { it?.providers.orEmpty().toCatalog() }
 
     /**
-     * Creates a thread and runs [text] as its first turn, returning the id.
+     * Creates a thread on [environmentId] and runs [text] as its first turn,
+     * returning the id.
      *
      * This mirrors T3 Code's mobile client: one `thread.turn.start` carrying a
      * `bootstrap.createThread` payload, with the title derived from the prompt
@@ -129,14 +182,14 @@ class ThreadsRepository(
      * shell subscription to catch up.
      */
     suspend fun startThread(
+        environmentId: EnvironmentId,
         projectId: ProjectId,
         text: String,
         modelSelection: ModelSelection,
         runtimeMode: String,
         interactionMode: String,
     ): Result<ThreadId> = runCatchingCancellable {
-        val client = supervisor.session.value
-            ?: error("Not connected to an environment.")
+        val client = connectedClient(environmentId)
         val threadId = ThreadId(idGenerator.newId())
         val title = deriveThreadTitleFromPrompt(text)
         val createdAt = timeProvider.nowIso()
@@ -171,13 +224,11 @@ class ThreadsRepository(
     }
 
     suspend fun setModelSelection(
+        environmentId: EnvironmentId,
         threadId: ThreadId,
         modelSelection: ModelSelection,
     ): Result<DispatchResult> = runCatchingCancellable {
-        val client = supervisor.session.value
-            ?: error("Not connected to an environment.")
-
-        client.dispatchCommand(
+        connectedClient(environmentId).dispatchCommand(
             ThreadMetaUpdateCommand(
                 commandId = idGenerator.newId(),
                 threadId = threadId,
@@ -186,29 +237,27 @@ class ThreadsRepository(
         )
     }
 
-    suspend fun setRuntimeMode(threadId: ThreadId, runtimeMode: String): Result<DispatchResult> =
-        runCatchingCancellable {
-            val client = supervisor.session.value
-                ?: error("Not connected to an environment.")
-
-            client.dispatchCommand(
-                ThreadRuntimeModeSetCommand(
-                    commandId = idGenerator.newId(),
-                    threadId = threadId,
-                    runtimeMode = runtimeMode,
-                    createdAt = timeProvider.nowIso(),
-                ) as ClientOrchestrationCommand,
-            )
-        }
+    suspend fun setRuntimeMode(
+        environmentId: EnvironmentId,
+        threadId: ThreadId,
+        runtimeMode: String,
+    ): Result<DispatchResult> = runCatchingCancellable {
+        connectedClient(environmentId).dispatchCommand(
+            ThreadRuntimeModeSetCommand(
+                commandId = idGenerator.newId(),
+                threadId = threadId,
+                runtimeMode = runtimeMode,
+                createdAt = timeProvider.nowIso(),
+            ) as ClientOrchestrationCommand,
+        )
+    }
 
     suspend fun setInteractionMode(
+        environmentId: EnvironmentId,
         threadId: ThreadId,
         interactionMode: String,
     ): Result<DispatchResult> = runCatchingCancellable {
-        val client = supervisor.session.value
-            ?: error("Not connected to an environment.")
-
-        client.dispatchCommand(
+        connectedClient(environmentId).dispatchCommand(
             ThreadInteractionModeSetCommand(
                 commandId = idGenerator.newId(),
                 threadId = threadId,
@@ -220,13 +269,11 @@ class ThreadsRepository(
 
     /** Stops the running turn. */
     suspend fun interruptTurn(
+        environmentId: EnvironmentId,
         threadId: ThreadId,
         turnId: String?,
     ): Result<DispatchResult> = runCatchingCancellable {
-        val client = supervisor.session.value
-            ?: error("Not connected to an environment.")
-
-        client.dispatchCommand(
+        connectedClient(environmentId).dispatchCommand(
             ThreadTurnInterruptCommand(
                 commandId = idGenerator.newId(),
                 threadId = threadId,
@@ -238,14 +285,12 @@ class ThreadsRepository(
 
     /** Decides a pending approval request. */
     suspend fun respondToApproval(
+        environmentId: EnvironmentId,
         threadId: ThreadId,
         requestId: String,
         decision: String,
     ): Result<DispatchResult> = runCatchingCancellable {
-        val client = supervisor.session.value
-            ?: error("Not connected to an environment.")
-
-        client.dispatchCommand(
+        connectedClient(environmentId).dispatchCommand(
             ThreadApprovalRespondCommand(
                 commandId = idGenerator.newId(),
                 threadId = threadId,
@@ -258,14 +303,12 @@ class ThreadsRepository(
 
     /** Answers a pending user-input request. */
     suspend fun respondToUserInput(
+        environmentId: EnvironmentId,
         threadId: ThreadId,
         requestId: String,
         answers: Map<String, JsonElement>,
     ): Result<DispatchResult> = runCatchingCancellable {
-        val client = supervisor.session.value
-            ?: error("Not connected to an environment.")
-
-        client.dispatchCommand(
+        connectedClient(environmentId).dispatchCommand(
             ThreadUserInputRespondCommand(
                 commandId = idGenerator.newId(),
                 threadId = threadId,
@@ -274,6 +317,14 @@ class ThreadsRepository(
                 createdAt = timeProvider.nowIso(),
             ) as ClientOrchestrationCommand,
         )
+    }
+
+    private fun connectedClient(environmentId: EnvironmentId): T3EnvironmentClient =
+        fleet.sessionNow(environmentId)
+            ?: error("Not connected to this environment.")
+
+    private companion object {
+        const val SHELL_STOP_TIMEOUT_MILLIS = 5_000L
     }
 }
 

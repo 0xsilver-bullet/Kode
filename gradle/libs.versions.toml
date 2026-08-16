@@ -19,6 +19,7 @@ ktor = "3.5.2"
 markdown = "0.43.0"
 material3 = "1.11.0-alpha07"
 navigation = "2.9.2"
+playServicesCodeScanner = "16.1.0"
 serialization = "1.11.0"
 turbine = "1.2.1"
 
@@ -76,6 +77,9 @@ markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-
 
 # Navigation
 navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-compose", version.ref = "navigation" }
+
+# QR scanning (Android only)
+play-services-code-scanner = { module = "com.google.android.gms:play-services-code-scanner", version.ref = "playServicesCodeScanner" }
 
 # Testing
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
