@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +71,7 @@ import com.silverbullet.kode.feature.threads.presentation.ComposerState
 import com.silverbullet.kode.feature.threads.presentation.ThreadDetailViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadFeedUiState
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import org.koin.compose.viewmodel.koinViewModel
@@ -177,7 +176,15 @@ fun ThreadDetailScreen(
     footer: @Composable (Modifier) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    FollowFeedTail(listState, feed.entries.size)
+    val entries = feed.entries
+    val newest = entries.lastOrNull()
+    FollowFeedTail(
+        listState = listState,
+        itemCount = entries.size,
+        newestEntryId = newest?.id,
+        newestIsUserMessage = newest is FeedEntry.Message &&
+            newest.message.role == MessageRole.USER,
+    )
 
     Column(modifier = modifier.fillMaxSize()) {
         feed.error?.let { error ->
@@ -199,18 +206,40 @@ fun ThreadDetailScreen(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    // The list is laid out bottom-up: index 0 is the newest
+                    // entry and sits against the bottom edge, indices grow
+                    // upwards into history. That is what makes an opened thread
+                    // start at its end — the resting scroll position of a fresh
+                    // `LazyListState` is index 0, offset 0, which in this
+                    // direction *is* the tail. No post-layout `scrollToItem`,
+                    // so no frame of the top of the thread before it jumps, and
+                    // no composing rows from the oldest end only to discard
+                    // them. It also pins the tail for free while the assistant
+                    // streams: the bottom item's anchor edge is its bottom, so
+                    // it grows upwards without any scrolling at all.
+                    reverseLayout = true,
+                    // Under `reverseLayout` the arrangement still reads in
+                    // visual top-down terms (the measure pass flips twice and
+                    // the flips cancel), so `Bottom` is what rests a thread
+                    // shorter than the viewport just above the composer instead
+                    // of stranding it under the header.
+                    verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
                 ) {
+                    // Indexed rather than `items(feed.entries)`: the data stays
+                    // in chronological order and only the *access* is reversed,
+                    // which costs an integer subtraction per lookup instead of
+                    // an `asReversed`/`reversed()` wrapper allocated on every
+                    // recomposition of the feed.
                     items(
-                        items = feed.entries,
-                        key = { it.id },
+                        count = entries.size,
+                        key = { entries[entries.lastIndex - it].id },
                         // Separate recycling pools per row shape, so the lazy
                         // list reuses subcomposition slots instead of
                         // rebuilding them.
-                        contentType = { it.contentType },
-                    ) { entry ->
+                        contentType = { entries[entries.lastIndex - it].contentType },
+                    ) { index ->
                         FeedRow(
-                            entry = entry,
+                            entry = entries[entries.lastIndex - index],
                             streamingMessageId = feed.streamingMessageId,
                             onToggleTurn = onToggleTurn,
                             onToggleWorkGroup = onToggleWorkGroup,
@@ -263,36 +292,67 @@ private fun FeedRow(
 }
 
 /**
- * Keeps the newest content in view while the assistant streams, without
- * hijacking the list.
+ * Re-pins the feed to its newest entry when one arrives, unless the user has
+ * scrolled away to read history.
  *
- * Three things matter. It only follows when the user is already at the bottom,
- * so scrolling up to re-read is not yanked back. It jumps rather than animates,
- * because a new animation per token batch would queue and fight itself. And it
- * refuses to scroll while a drag or fling is in progress — `scrollToItem` takes
- * the scroll mutex at default priority, which would cancel the user's gesture
- * mid-flick.
+ * The reverse layout already handles the hard half: an entry appended to the
+ * thread is *prepended* at index 0, and growth of the bottom-most row extends
+ * upwards, so a reader parked in the middle of the thread is never shifted and
+ * no visible-content-position compensation is needed. What it does not handle
+ * is the reader who *is* at the tail: `LazyListState` anchors on the key of the
+ * first visible item, so inserting at index 0 re-indexes that anchor to 1 and
+ * the new row lands just below the viewport. This nudges it back.
+ *
+ * Following is a latch, not a per-event geometry test, mirroring T3 Code's
+ * live-follow behaviour. It is re-evaluated only when a scroll settles: any
+ * gesture that comes to rest away from the tail opts out until the user
+ * returns to it — or until they send, which re-arms it, because a message you
+ * just wrote is one you want to watch being answered. Sampling "am I at the
+ * bottom?" at insert time instead would race the re-indexing above — by then
+ * the anchor has already moved off the tail and every follower would be
+ * dropped on the first new row.
+ *
+ * It jumps rather than animates, because a new animation per token batch would
+ * queue and fight itself, and it refuses to scroll while a drag or fling is in
+ * progress: `scrollToItem` takes the scroll mutex at default priority, which
+ * would cancel the user's gesture mid-flick.
  */
 @Composable
-private fun FollowFeedTail(listState: LazyListState, itemCount: Int) {
-    val isAtBottom by remember(listState) {
-        derivedStateOf {
-            val layout = listState.layoutInfo
-            val last = layout.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
-            last.index >= layout.totalItemsCount - 1
-        }
+private fun FollowFeedTail(
+    listState: LazyListState,
+    itemCount: Int,
+    newestEntryId: String?,
+    newestIsUserMessage: Boolean,
+) {
+    // Deliberately not a `derivedStateOf` over `layoutInfo`: that invalidates on
+    // every measure pass, which during streaming is every frame. These two
+    // fields are read only when a scroll ends.
+    var following by remember(listState) { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .filter { !it }
+            .collect {
+                following = listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset == 0
+            }
     }
 
-    // `itemCount` is a plain parameter, so it has to be funnelled through
-    // `rememberUpdatedState` for `snapshotFlow` to observe it. Keying the effect
-    // on the count would restart the collector on every token batch.
+    // Plain parameters, so they have to be funnelled through
+    // `rememberUpdatedState` for `snapshotFlow` to observe them. Keying the
+    // effect on them would restart the collector on every token batch.
     val latestCount by rememberUpdatedState(itemCount)
+    val latestNewestId by rememberUpdatedState(newestEntryId)
+    val latestNewestIsUser by rememberUpdatedState(newestIsUserMessage)
     LaunchedEffect(listState) {
-        snapshotFlow { latestCount }
+        // The id as well as the count: folding a settled turn can swap the
+        // tail entry without changing how many there are.
+        snapshotFlow { latestCount to latestNewestId }
             .distinctUntilChanged()
-            .collect { count ->
-                if (count > 0 && isAtBottom && !listState.isScrollInProgress) {
-                    listState.scrollToItem(count - 1)
+            .collect { (count, _) ->
+                if (count == 0) return@collect
+                if (latestNewestIsUser) following = true
+                if (following && !listState.isScrollInProgress) {
+                    listState.scrollToItem(0)
                 }
             }
     }
