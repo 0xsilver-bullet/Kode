@@ -121,9 +121,10 @@ data class OrchestrationMessage(
     val text: String,
     val turnId: String? = null,
     /**
-     * True while the assistant is still producing this message. The server
-     * re-sends the message with the full accumulated text on every delta, so
-     * rendering is an upsert by [id] — never an append.
+     * True while the assistant is still producing this message. A streaming
+     * event's [text] is only the newly produced chunk — never the accumulated
+     * reply — so folding it in is an append by [id]. Snapshots carry the full
+     * projected text with [streaming] already settled.
      */
     val streaming: Boolean = false,
     val createdAt: String,

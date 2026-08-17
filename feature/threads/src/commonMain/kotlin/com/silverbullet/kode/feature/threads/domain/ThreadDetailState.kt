@@ -1,11 +1,15 @@
 package com.silverbullet.kode.feature.threads.domain
 
 import androidx.compose.runtime.Immutable
+import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.OrchestrationEvent
+import com.silverbullet.kode.core.model.OrchestrationLatestTurn
 import com.silverbullet.kode.core.model.OrchestrationMessage
 import com.silverbullet.kode.core.model.OrchestrationSession
 import com.silverbullet.kode.core.model.OrchestrationThread
+import com.silverbullet.kode.core.model.SessionStatus
 import com.silverbullet.kode.core.model.ThreadStreamItem
+import com.silverbullet.kode.core.model.TurnState
 
 /**
  * One thread's timeline, folded from the thread subscription.
@@ -25,6 +29,13 @@ data class ThreadDetailState(
     val pendingUserInputs: Map<String, PendingUserInput> = emptyMap(),
     /** Open approval requests, keyed by request id. */
     val pendingApprovals: Map<String, PendingApproval> = emptyMap(),
+    /**
+     * The highest event sequence folded in so far, seeded from the snapshot's
+     * `snapshotSequence`. The server attaches its live tap *before* loading the
+     * snapshot, so events already baked into the snapshot can be re-delivered
+     * right after it; replaying one would double-append a streamed delta.
+     */
+    val lastSequence: Int = 0,
     val error: String? = null,
 ) {
     /** Whether the agent is working, which drives the working indicator. */
@@ -47,10 +58,12 @@ data class ThreadDetailState(
 /**
  * Applies one thread stream item.
  *
- * The important case is [OrchestrationEvent.MessageSent]: the server re-sends a
- * streaming assistant message with the **full accumulated text** on every
- * delta, so this upserts by message id rather than appending. Treating it as an
- * append would duplicate the reply on screen, one copy per token batch.
+ * The important case is [OrchestrationEvent.MessageSent]: a streaming assistant
+ * event carries only the **newly produced chunk** (`decider.ts` maps each
+ * `thread.message.assistant.delta` to a `message-sent` whose `text` is the
+ * delta), so the client accumulates by appending — mirroring
+ * `applyThreadDetailEvent` in T3 Code's `threadReducer.ts`. The closing
+ * `streaming: false` event carries *empty* text and merely settles the message.
  */
 fun ThreadDetailState.reduce(item: ThreadStreamItem): ThreadDetailState = when (item) {
     is ThreadStreamItem.Snapshot -> {
@@ -64,6 +77,7 @@ fun ThreadDetailState.reduce(item: ThreadStreamItem): ThreadDetailState = when (
             // payload, and the questions live there.
             pendingUserInputs = derivePendingUserInputs(thread.activities),
             pendingApprovals = derivePendingApprovals(thread.activities),
+            lastSequence = item.snapshot.snapshotSequence,
             status = SyncStatus.Synchronizing,
             error = null,
         )
@@ -71,13 +85,22 @@ fun ThreadDetailState.reduce(item: ThreadStreamItem): ThreadDetailState = when (
 
     ThreadStreamItem.Synchronized -> copy(status = SyncStatus.Live)
 
-    is ThreadStreamItem.Event -> reduce(item.event).copy(status = SyncStatus.Live)
+    is ThreadStreamItem.Event ->
+        // Events at or below the cursor were already folded in — either baked
+        // into the snapshot or replayed across a resubscribe. With append
+        // semantics for streamed text, applying one twice corrupts the reply.
+        if (item.event.sequence <= lastSequence) {
+            this
+        } else {
+            reduce(item.event).copy(status = SyncStatus.Live, lastSequence = item.event.sequence)
+        }
 
     is ThreadStreamItem.Unsupported -> this
 }
 
 private fun ThreadDetailState.reduce(event: OrchestrationEvent): ThreadDetailState = when (event) {
-    is OrchestrationEvent.MessageSent -> upsertMessage(event.message)
+    is OrchestrationEvent.MessageSent ->
+        upsertMessage(event.message).settleTurnForMessage(event.message)
 
     is OrchestrationEvent.ActivityAppended -> {
         val activity = event.activity
@@ -101,7 +124,7 @@ private fun ThreadDetailState.reduce(event: OrchestrationEvent): ThreadDetailSta
         }
     }
 
-    is OrchestrationEvent.SessionSet -> copy(session = event.session)
+    is OrchestrationEvent.SessionSet -> applySession(event.session)
 
     // Without these three the thread we render from never changed, so a
     // configuration change looked like it had silently failed.
@@ -128,16 +151,116 @@ private fun ThreadDetailState.reduce(event: OrchestrationEvent): ThreadDetailSta
 }
 
 /**
- * Replaces a message with the same id, or appends a new one.
+ * Merges a message into the list by id, or appends a new one.
  *
- * The replace path is the streaming hot path: a message keeps its `createdAt`
- * as it grows, so its position cannot change and the list needs no re-sort.
+ * The merge path is the streaming hot path: a `streaming: true` event's text is
+ * a delta to append, a `streaming: false` one closes the message — with the
+ * full text when the server sends it, otherwise keeping what was accumulated
+ * (the finalize event carries empty text). A message keeps its `createdAt` as
+ * it grows, so its position cannot change and the list needs no re-sort.
  */
 private fun ThreadDetailState.upsertMessage(message: OrchestrationMessage): ThreadDetailState {
     val index = messages.indexOfFirst { it.id == message.id }
-    return if (index < 0) {
-        copy(messages = messages + message)
-    } else {
-        copy(messages = messages.toMutableList().apply { set(index, message) })
+    if (index < 0) return copy(messages = messages + message)
+
+    val existing = messages[index]
+    val merged = existing.copy(
+        text = when {
+            message.streaming -> existing.text + message.text
+            message.text.isNotEmpty() -> message.text
+            else -> existing.text
+        },
+        streaming = message.streaming,
+        turnId = message.turnId ?: existing.turnId,
+        // Deltas reuse the command timestamp; only the closing event is a
+        // meaningful "last touched" time.
+        updatedAt = if (message.streaming) existing.updatedAt else message.updatedAt,
+    )
+    return copy(messages = messages.toMutableList().apply { set(index, merged) })
+}
+
+/**
+ * Keeps `thread.latestTurn` truthful while events stream in.
+ *
+ * The snapshot's `latestTurn` describes the *previous* turn; without this the
+ * presenter treats the turn that started after subscribing as settled and folds
+ * its live tool activity out of view. Ported from `thread.session-set` handling
+ * in T3 Code's `threadReducer.ts`: entering `running` (re)points the turn at
+ * `activeTurnId`; leaving `running` is the authoritative turn end and settles a
+ * still-running turn.
+ */
+private fun ThreadDetailState.applySession(session: OrchestrationSession): ThreadDetailState {
+    val current = thread?.latestTurn
+    val activeTurnId = session.activeTurnId
+    val settledState = settledTurnStateForSessionStatus(session.status)
+    val latestTurn = when {
+        session.status == SessionStatus.RUNNING && activeTurnId != null -> {
+            // Carry the turn's own timestamps across repeated session updates.
+            val carried = current?.takeIf { it.turnId == activeTurnId }
+            OrchestrationLatestTurn(
+                turnId = activeTurnId,
+                state = TurnState.RUNNING,
+                requestedAt = carried?.requestedAt ?: session.updatedAt,
+                startedAt = carried?.startedAt ?: session.updatedAt,
+                completedAt = null,
+                assistantMessageId = carried?.assistantMessageId,
+            )
+        }
+
+        current?.state == TurnState.RUNNING && settledState != null ->
+            current.copy(state = settledState, completedAt = session.updatedAt)
+
+        else -> current
     }
+    return copy(session = session, thread = thread?.copy(latestTurn = latestTurn))
+}
+
+/**
+ * Turn state to settle a still-running turn with when its session leaves
+ * `running`, or null while the session is (re)starting or running and the turn
+ * must stay unsettled. Mirrors `settledTurnStateForSessionStatus` in T3 Code.
+ */
+private fun settledTurnStateForSessionStatus(status: String): String? = when (status) {
+    SessionStatus.IDLE, SessionStatus.READY -> TurnState.COMPLETED
+    SessionStatus.ERROR -> TurnState.ERROR
+    SessionStatus.INTERRUPTED, SessionStatus.STOPPED -> TurnState.INTERRUPTED
+    else -> null
+}
+
+/**
+ * Tracks `latestTurn` from assistant messages, mirroring the `message-sent`
+ * branch of T3 Code's reducer. A completed assistant message only settles the
+ * turn once the session is no longer running it — providers emit several
+ * assistant messages per turn (commentary between tool calls), and the turn
+ * must stay unsettled until the provider reports turn end.
+ */
+private fun ThreadDetailState.settleTurnForMessage(
+    message: OrchestrationMessage,
+): ThreadDetailState {
+    val thread = thread ?: return this
+    val turnId = message.turnId
+    if (message.role != MessageRole.ASSISTANT || turnId == null) return this
+
+    // From here `current` is either null or this message's own turn.
+    val current = thread.latestTurn
+    if (current != null && current.turnId != turnId) return this
+
+    val turnStillRunning = session.let {
+        it != null && it.status == SessionStatus.RUNNING && it.activeTurnId == turnId
+    }
+    val settlesTurn = !message.streaming && !turnStillRunning
+    val latestTurn = OrchestrationLatestTurn(
+        turnId = turnId,
+        state = when {
+            !settlesTurn -> TurnState.RUNNING
+            current?.state == TurnState.INTERRUPTED -> TurnState.INTERRUPTED
+            current?.state == TurnState.ERROR -> TurnState.ERROR
+            else -> TurnState.COMPLETED
+        },
+        requestedAt = current?.requestedAt ?: message.createdAt,
+        startedAt = current?.startedAt ?: message.createdAt,
+        completedAt = if (settlesTurn) message.updatedAt else current?.completedAt,
+        assistantMessageId = message.id,
+    )
+    return copy(thread = thread.copy(latestTurn = latestTurn))
 }

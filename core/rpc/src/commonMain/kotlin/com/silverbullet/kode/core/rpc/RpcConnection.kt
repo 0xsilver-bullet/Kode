@@ -5,6 +5,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -82,10 +84,16 @@ class RpcConnection internal constructor(
             }
             completed = true
         } finally {
-            unregister(id)
-            if (!completed) {
-                // Best effort: the socket may already be gone.
-                runCatching { sendFrame(RpcInterrupt(requestId = id)) }
+            // This finally usually runs in an already-cancelled coroutine, where
+            // the mutex in `unregister` can throw instead of running. A stream
+            // left registered with nobody draining it would eventually fill its
+            // buffer and wedge the connection's single reader loop.
+            withContext(NonCancellable) {
+                unregister(id)
+                if (!completed) {
+                    // Best effort: the socket may already be gone.
+                    runCatching { sendFrame(RpcInterrupt(requestId = id)) }
+                }
             }
         }
     }

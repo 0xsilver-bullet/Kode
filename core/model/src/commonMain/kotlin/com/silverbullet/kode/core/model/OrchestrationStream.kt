@@ -51,8 +51,10 @@ sealed interface OrchestrationEvent {
 
     /**
      * Covers user messages *and* streaming assistant output: the server turns
-     * each `thread.message.assistant.delta` into one of these carrying the full
-     * accumulated text, so the client upserts by message id.
+     * each `thread.message.assistant.delta` into one of these whose `text` is
+     * **only the new chunk** (`streaming: true`), so the client appends by
+     * message id. The closing event (`streaming: false`) carries empty text and
+     * settles the message without touching the accumulated reply.
      */
     data class MessageSent(
         override val sequence: Int,

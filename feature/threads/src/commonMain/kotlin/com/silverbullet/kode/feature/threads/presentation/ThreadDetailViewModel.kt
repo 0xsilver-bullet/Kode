@@ -25,6 +25,7 @@ import com.silverbullet.kode.feature.threads.domain.UserInputAnswers
 import com.silverbullet.kode.feature.threads.domain.buildUserInputAnswers
 import com.silverbullet.kode.feature.threads.domain.toggleOption
 import com.silverbullet.kode.feature.threads.domain.SyncStatus
+import com.silverbullet.kode.feature.threads.domain.ThreadDetailState
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
 import com.silverbullet.kode.feature.threads.domain.buildFeed
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,6 +51,22 @@ class ThreadDetailViewModel(
     private val approvalForm = MutableStateFlow(ApprovalFormState())
     private val _interrupting = MutableStateFlow(false)
 
+    /**
+     * The screen's one thread subscription, shared by [approval], [userInput]
+     * and [feed]. Collecting `repository.thread` in each `combine` opened three
+     * `orchestration.subscribeThread` streams per screen — tripling socket
+     * traffic, chunk decoding and reducer work for identical data. `flowOn`
+     * keeps the decode/reduce fold off the main thread.
+     */
+    private val detail: StateFlow<ThreadDetailState> =
+        repository.thread(environmentId, threadId)
+            .flowOn(dispatchers.default)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = ThreadDetailState(),
+            )
+
     /** True while a stop request is in flight. */
     val interrupting: StateFlow<Boolean> = _interrupting.asStateFlow()
 
@@ -70,7 +87,7 @@ class ThreadDetailViewModel(
      * action the agent is part-way through, and answering it is a single tap.
      */
     val approval: StateFlow<ApprovalUiState> =
-        combine(repository.thread(environmentId, threadId), approvalForm) { detail, form ->
+        combine(detail, approvalForm) { detail, form ->
             val pending = detail.activeApproval
                 ?: return@combine ApprovalUiState()
 
@@ -93,7 +110,7 @@ class ThreadDetailViewModel(
      * streamed token must not recompose the card the user is typing into.
      */
     val userInput: StateFlow<UserInputUiState> =
-        combine(repository.thread(environmentId, threadId), userInputForm) { detail, form ->
+        combine(detail, userInputForm) { detail, form ->
             val pending = detail.activeUserInput
                 ?: return@combine UserInputUiState()
 
@@ -124,7 +141,7 @@ class ThreadDetailViewModel(
      */
     val feed: StateFlow<ThreadFeedUiState> =
         combine(
-            repository.thread(environmentId, threadId),
+            detail,
             expansion,
             repository.catalog(environmentId),
         ) { detail, expanded, catalog ->

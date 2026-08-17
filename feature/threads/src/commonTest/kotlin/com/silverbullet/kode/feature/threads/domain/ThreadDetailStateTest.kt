@@ -14,6 +14,7 @@ import com.silverbullet.kode.core.model.RuntimeMode
 import com.silverbullet.kode.core.model.SessionStatus
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ThreadStreamItem
+import com.silverbullet.kode.core.model.TurnState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -24,22 +25,58 @@ class ThreadDetailStateTest {
     private val threadId = ThreadId("t1")
 
     @Test
-    fun `a streaming assistant message replaces in place rather than appending`() {
+    fun `streaming assistant deltas accumulate by appending`() {
         // This is the single most important behaviour in the timeline. The
-        // server re-sends the whole accumulated text on every delta, so
-        // appending would render one copy of the reply per token batch.
+        // server maps each `thread.message.assistant.delta` to a `message-sent`
+        // whose text is *only the new chunk* (`decider.ts`), so the client must
+        // append. Treating a delta as the full text renders only the latest
+        // fragment of the reply.
         var state = ThreadDetailState().reduce(snapshotItem())
 
         state = state.reduce(messageEvent(sequence = 2, text = "Reading", streaming = true))
-        state = state.reduce(messageEvent(sequence = 3, text = "Reading the", streaming = true))
-        state = state.reduce(
-            messageEvent(sequence = 4, text = "Reading the contracts", streaming = false),
-        )
+        state = state.reduce(messageEvent(sequence = 3, text = " the", streaming = true))
+        state = state.reduce(messageEvent(sequence = 4, text = " contracts", streaming = true))
+        // The finalize event carries empty text and must not wipe the reply.
+        state = state.reduce(messageEvent(sequence = 5, text = "", streaming = false))
 
         val assistantMessages = state.messages.filter { it.role == MessageRole.ASSISTANT }
         assertEquals(1, assistantMessages.size)
         assertEquals("Reading the contracts", assistantMessages.single().text)
         assertFalse(assistantMessages.single().streaming)
+    }
+
+    @Test
+    fun `a closing event with text replaces the accumulated reply`() {
+        var state = ThreadDetailState().reduce(snapshotItem())
+
+        state = state.reduce(messageEvent(sequence = 2, text = "drafty", streaming = true))
+        state = state.reduce(messageEvent(sequence = 3, text = "Final text.", streaming = false))
+
+        assertEquals(
+            "Final text.",
+            state.messages.single { it.role == MessageRole.ASSISTANT }.text,
+        )
+    }
+
+    @Test
+    fun `an event at or below the snapshot sequence is dropped`() {
+        // The server attaches its live tap before loading the snapshot, so an
+        // event already baked into the snapshot can be re-delivered right after
+        // it. Applying it again would double-append a streamed delta.
+        var state = ThreadDetailState().reduce(
+            ThreadStreamItem.Snapshot(
+                OrchestrationThreadDetailSnapshot(snapshotSequence = 5, thread = thread()),
+            ),
+        )
+
+        state = state.reduce(messageEvent(sequence = 5, text = "stale", streaming = true))
+        assertTrue(state.messages.none { it.role == MessageRole.ASSISTANT })
+
+        state = state.reduce(messageEvent(sequence = 6, text = "fresh", streaming = true))
+        assertEquals(
+            "fresh",
+            state.messages.single { it.role == MessageRole.ASSISTANT }.text,
+        )
     }
 
     @Test
@@ -126,6 +163,72 @@ class ThreadDetailStateTest {
     }
 
     @Test
+    fun `a running session points latestTurn at the active turn`() {
+        // The snapshot's latestTurn describes the *previous* turn. Without
+        // re-pointing it here, the feed presenter folds the turn that started
+        // after subscribing as if it were settled, hiding its live tool calls.
+        var state = ThreadDetailState().reduce(snapshotItem())
+
+        state = state.reduce(
+            sessionEvent(sequence = 2, status = SessionStatus.RUNNING, activeTurnId = "turn-2"),
+        )
+
+        assertEquals("turn-2", state.thread?.latestTurn?.turnId)
+        assertEquals(TurnState.RUNNING, state.thread?.latestTurn?.state)
+    }
+
+    @Test
+    fun `leaving the running status settles the turn`() {
+        var state = ThreadDetailState().reduce(snapshotItem())
+        state = state.reduce(
+            sessionEvent(sequence = 2, status = SessionStatus.RUNNING, activeTurnId = "turn-2"),
+        )
+
+        val completed = state.reduce(sessionEvent(sequence = 3, status = SessionStatus.IDLE))
+        assertEquals(TurnState.COMPLETED, completed.thread?.latestTurn?.state)
+
+        val interrupted = state.reduce(
+            sessionEvent(sequence = 3, status = SessionStatus.INTERRUPTED),
+        )
+        assertEquals(TurnState.INTERRUPTED, interrupted.thread?.latestTurn?.state)
+
+        val failed = state.reduce(sessionEvent(sequence = 3, status = SessionStatus.ERROR))
+        assertEquals(TurnState.ERROR, failed.thread?.latestTurn?.state)
+    }
+
+    @Test
+    fun `an assistant message keeps its turn running while the session runs it`() {
+        var state = ThreadDetailState().reduce(snapshotItem())
+        state = state.reduce(
+            sessionEvent(sequence = 2, status = SessionStatus.RUNNING, activeTurnId = "turn-2"),
+        )
+
+        // Providers emit several assistant messages per turn; a completed one
+        // must not settle the turn while the session still runs it.
+        state = state.reduce(
+            messageEvent(sequence = 3, text = "part one", streaming = false, turnId = "turn-2"),
+        )
+
+        assertEquals(TurnState.RUNNING, state.thread?.latestTurn?.state)
+        assertEquals("m2", state.thread?.latestTurn?.assistantMessageId)
+    }
+
+    @Test
+    fun `a final assistant message settles the turn once the session stopped running`() {
+        var state = ThreadDetailState().reduce(snapshotItem())
+        state = state.reduce(
+            sessionEvent(sequence = 2, status = SessionStatus.RUNNING, activeTurnId = "turn-2"),
+        )
+        state = state.reduce(sessionEvent(sequence = 3, status = SessionStatus.IDLE))
+
+        state = state.reduce(
+            messageEvent(sequence = 4, text = "done", streaming = false, turnId = "turn-2"),
+        )
+
+        assertEquals(TurnState.COMPLETED, state.thread?.latestTurn?.state)
+    }
+
+    @Test
     fun `an unsupported event leaves the state untouched`() {
         val state = ThreadDetailState().reduce(snapshotItem())
         val after = state.reduce(
@@ -204,6 +307,7 @@ class ThreadDetailStateTest {
         sequence: Int,
         text: String,
         streaming: Boolean = false,
+        turnId: String? = null,
         createdAt: String = "2026-08-15T10:00:10.000Z",
     ) = ThreadStreamItem.Event(
         OrchestrationEvent.MessageSent(
@@ -213,6 +317,7 @@ class ThreadDetailStateTest {
                 id = "m2",
                 role = MessageRole.ASSISTANT,
                 text = text,
+                turnId = turnId,
                 streaming = streaming,
                 createdAt = createdAt,
                 updatedAt = createdAt,
@@ -238,13 +343,18 @@ class ThreadDetailStateTest {
         ),
     )
 
-    private fun sessionEvent(sequence: Int, status: String) = ThreadStreamItem.Event(
+    private fun sessionEvent(
+        sequence: Int,
+        status: String,
+        activeTurnId: String? = null,
+    ) = ThreadStreamItem.Event(
         OrchestrationEvent.SessionSet(
             sequence = sequence,
             threadId = threadId,
             session = OrchestrationSession(
                 threadId = threadId,
                 status = status,
+                activeTurnId = activeTurnId,
                 updatedAt = "2026-08-15T10:00:00.000Z",
             ),
         ),
