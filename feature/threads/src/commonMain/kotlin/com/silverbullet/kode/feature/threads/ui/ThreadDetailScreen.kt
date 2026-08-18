@@ -46,10 +46,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.silverbullet.kode.core.designsystem.KodeIcons
 import com.silverbullet.kode.core.designsystem.KodeMarkdown
+import com.silverbullet.kode.core.designsystem.KodeMarkdownBlockGroup
 import com.silverbullet.kode.core.designsystem.KodeMarkdownSizes
 import com.silverbullet.kode.core.designsystem.KodeStreamingMarkdown
 import com.silverbullet.kode.core.designsystem.KodeTheme
@@ -253,8 +255,12 @@ fun ThreadDetailScreen(
                     // visual top-down terms (the measure pass flips twice and
                     // the flips cancel), so `Bottom` is what rests a thread
                     // shorter than the viewport just above the composer instead
-                    // of stranding it under the header.
-                    verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
+                    // of stranding it under the header. Inter-row spacing is
+                    // per-row padding rather than `spacedBy`: consecutive
+                    // blocks of one exploded message must sit flush (their
+                    // markdown spacers already separate them), which a uniform
+                    // arrangement gap cannot express.
+                    verticalArrangement = Arrangement.Bottom,
                 ) {
                     // Indexed rather than `items(feed.entries)`: the data stays
                     // in chronological order and only the *access* is reversed,
@@ -269,13 +275,18 @@ fun ThreadDetailScreen(
                         // rebuilding them.
                         contentType = { entries[entries.lastIndex - it].contentType },
                     ) { index ->
+                        val position = entries.lastIndex - index
+                        val entry = entries[position]
                         FeedRow(
-                            entry = entries[entries.lastIndex - index],
+                            entry = entry,
                             streamingMessageId = feed.streamingMessageId,
                             onToggleTurn = onToggleTurn,
                             onToggleWorkGroup = onToggleWorkGroup,
                             resolveAttachmentUrl = resolveAttachmentUrl,
                             onPreviewAttachment = { previewUrl = it },
+                            modifier = Modifier.padding(
+                                top = entryGapAbove(entries.getOrNull(position - 1), entry),
+                            ),
                         )
                     }
                 }
@@ -304,10 +315,37 @@ fun ThreadDetailScreen(
 private val FeedEntry.contentType: String
     get() = when (this) {
         is FeedEntry.Message -> "message:" + message.role
+        // Per block *type*, so a paragraph row recycles a paragraph slot and a
+        // code fence recycles a code fence — finer pools than one per message.
+        is FeedEntry.MessageBlock -> "md:" + block.contentType
+        is FeedEntry.MessageAttachments -> "message-attachments"
         is FeedEntry.Activity -> "activity"
         is FeedEntry.WorkToggle -> "work-toggle"
         is FeedEntry.TurnFold -> "turn-fold"
     }
+
+/**
+ * The vertical gap a row owns above itself, replacing the list-wide
+ * `spacedBy(8.dp)`.
+ *
+ * Blocks of the same exploded message sit flush — each block already carries
+ * markdown's own 4dp leading spacer, so any list gap on top would widen a
+ * message's internal rhythm. The attachment strip keeps the 6dp its message
+ * column used to give it. Everything else keeps the original 8dp.
+ */
+private fun entryGapAbove(previous: FeedEntry?, entry: FeedEntry): Dp = when {
+    previous == null -> 0.dp
+
+    entry is FeedEntry.MessageBlock &&
+        previous is FeedEntry.MessageBlock &&
+        previous.messageId == entry.messageId -> 0.dp
+
+    entry is FeedEntry.MessageAttachments &&
+        previous is FeedEntry.MessageBlock &&
+        previous.messageId == entry.messageId -> 6.dp
+
+    else -> 8.dp
+}
 
 @Composable
 private fun FeedRow(
@@ -317,6 +355,7 @@ private fun FeedRow(
     onToggleWorkGroup: (String) -> Unit,
     resolveAttachmentUrl: suspend (String) -> String?,
     onPreviewAttachment: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     when (entry) {
         is FeedEntry.Message -> MessageRow(
@@ -324,11 +363,24 @@ private fun FeedRow(
             isStreaming = entry.message.id == streamingMessageId,
             resolveAttachmentUrl = resolveAttachmentUrl,
             onPreviewAttachment = onPreviewAttachment,
+            modifier = modifier,
         )
 
-        is FeedEntry.Activity -> ActivityRow(entry.activity)
-        is FeedEntry.WorkToggle -> WorkToggleRow(entry, onToggleWorkGroup)
-        is FeedEntry.TurnFold -> TurnFoldRow(entry, onToggleTurn)
+        is FeedEntry.MessageBlock -> KodeMarkdownBlockGroup(
+            group = entry.block,
+            modifier = modifier.fillMaxWidth(),
+        )
+
+        is FeedEntry.MessageAttachments -> MessageAttachments(
+            attachments = entry.attachments,
+            resolveUrl = resolveAttachmentUrl,
+            onPreview = onPreviewAttachment,
+            modifier = modifier,
+        )
+
+        is FeedEntry.Activity -> ActivityRow(entry.activity, modifier)
+        is FeedEntry.WorkToggle -> WorkToggleRow(entry, onToggleWorkGroup, modifier)
+        is FeedEntry.TurnFold -> TurnFoldRow(entry, onToggleTurn, modifier)
     }
 }
 
@@ -405,10 +457,11 @@ private fun MessageRow(
     isStreaming: Boolean,
     resolveAttachmentUrl: suspend (String) -> String?,
     onPreviewAttachment: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     when (message.role) {
-        MessageRole.USER -> UserBubble(message, resolveAttachmentUrl, onPreviewAttachment)
-        else -> AssistantMessage(message, isStreaming, resolveAttachmentUrl, onPreviewAttachment)
+        MessageRole.USER -> UserBubble(message, resolveAttachmentUrl, onPreviewAttachment, modifier)
+        else -> AssistantMessage(message, isStreaming, resolveAttachmentUrl, onPreviewAttachment, modifier)
     }
 }
 
@@ -417,9 +470,10 @@ private fun UserBubble(
     message: OrchestrationMessage,
     resolveAttachmentUrl: suspend (String) -> String?,
     onPreviewAttachment: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = KodeTheme.colors
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Column(
             modifier = Modifier
                 .widthIn(max = 320.dp)
@@ -448,16 +502,26 @@ private fun UserBubble(
     }
 }
 
+/**
+ * A message rendered as a single row.
+ *
+ * Settled assistant messages normally never reach this — the feed pipeline
+ * explodes them into [FeedEntry.MessageBlock] rows. What lands here is the
+ * streaming message (whose renderer needs the whole document to re-parse its
+ * unstable tail) and the rare message whose parse failed, for which
+ * [KodeMarkdown] remains the monolithic fallback.
+ */
 @Composable
 private fun AssistantMessage(
     message: OrchestrationMessage,
     isStreaming: Boolean,
     resolveAttachmentUrl: suspend (String) -> String?,
     onPreviewAttachment: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     if (message.text.isEmpty() && message.attachments.isEmpty()) return
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (message.text.isNotEmpty()) {
             if (isStreaming) {
                 KodeStreamingMarkdown(text = message.text, modifier = Modifier.fillMaxWidth())
@@ -482,10 +546,14 @@ private fun AssistantMessage(
 
 /** One row standing in for a whole settled turn. */
 @Composable
-private fun TurnFoldRow(entry: FeedEntry.TurnFold, onToggle: (String) -> Unit) {
+private fun TurnFoldRow(
+    entry: FeedEntry.TurnFold,
+    onToggle: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = KodeTheme.colors
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onToggle(entry.turnId) }
             .padding(vertical = 6.dp),
@@ -512,7 +580,11 @@ private fun TurnFoldRow(entry: FeedEntry.TurnFold, onToggle: (String) -> Unit) {
 
 /** "+3 previous tool calls" / "Show fewer tool calls". */
 @Composable
-private fun WorkToggleRow(entry: FeedEntry.WorkToggle, onToggle: (String) -> Unit) {
+private fun WorkToggleRow(
+    entry: FeedEntry.WorkToggle,
+    onToggle: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val noun = when {
         entry.onlyToolActivities && entry.hiddenCount == 1 -> "tool call"
         entry.onlyToolActivities -> "tool calls"
@@ -524,7 +596,7 @@ private fun WorkToggleRow(entry: FeedEntry.WorkToggle, onToggle: (String) -> Uni
         text = if (entry.expanded) "Show fewer $noun" else "+${entry.hiddenCount} previous $noun",
         style = MaterialTheme.typography.bodySmall,
         color = KodeTheme.colors.muted,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onToggle(entry.groupId) }
             .padding(start = 24.dp, top = 2.dp, bottom = 2.dp),
@@ -540,7 +612,7 @@ private fun WorkToggleRow(entry: FeedEntry.WorkToggle, onToggle: (String) -> Uni
  * behind the group toggle instead.
  */
 @Composable
-private fun ActivityRow(activity: ActivityPresentation) {
+private fun ActivityRow(activity: ActivityPresentation, modifier: Modifier = Modifier) {
     val colors = KodeTheme.colors
 
     val tint = when (activity.status) {
@@ -555,7 +627,7 @@ private fun ActivityRow(activity: ActivityPresentation) {
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        modifier = modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {

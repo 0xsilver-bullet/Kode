@@ -39,8 +39,11 @@ import com.silverbullet.kode.feature.threads.domain.SyncStatus
 import com.silverbullet.kode.feature.threads.domain.ThreadDetailState
 import com.silverbullet.kode.feature.threads.domain.ThreadHeader
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
+import com.silverbullet.kode.core.designsystem.MarkdownParseCache
+import com.silverbullet.kode.core.designsystem.parseBlockGroups
 import com.silverbullet.kode.feature.threads.domain.buildThreadHeader
 import com.silverbullet.kode.feature.threads.domain.buildFeed
+import com.silverbullet.kode.feature.threads.domain.splitSettledAssistantMessages
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -61,6 +64,18 @@ class ThreadDetailViewModel(
 ) : ViewModel() {
 
     private val expansion = MutableStateFlow(FeedExpansion())
+
+    /**
+     * Parsed markdown for this thread's settled messages, keyed `id:length`.
+     *
+     * Owned by the ViewModel, not the app-root render cache: the feed pipeline
+     * needs *every* presented message's parse alive at once to build block
+     * entries, and an LRU sized for "a few screens of scrollback" would thrash
+     * on long threads — re-parsing evicted messages on every streamed delta.
+     * Unbounded is safe here because it is capped by the thread's own visible
+     * messages and dies with the screen.
+     */
+    private val markdownCache = MarkdownParseCache(maxEntries = Int.MAX_VALUE)
     private val _composer = MutableStateFlow(ComposerState())
     private val userInputForm = MutableStateFlow(UserInputFormState())
     private val approvalForm = MutableStateFlow(ApprovalFormState())
@@ -278,11 +293,18 @@ class ThreadDetailViewModel(
                 optionDescriptors = selected?.model
                     ?.resolveOptionDescriptors(selection?.options)
                     .orEmpty(),
-                entries = buildFeed(
-                    messages = detail.messages,
-                    activities = detail.activities,
-                    latestTurn = detail.thread?.latestTurn,
-                    expansion = expanded,
+                // Split *after* folding, so only messages the fold pipeline
+                // kept are ever parsed. `flowOn` below keeps the parse of a
+                // freshly settled message off the main thread, and the cache
+                // makes every later rebuild a lookup.
+                entries = splitSettledAssistantMessages(
+                    entries = buildFeed(
+                        messages = detail.messages,
+                        activities = detail.activities,
+                        latestTurn = detail.thread?.latestTurn,
+                        expansion = expanded,
+                    ),
+                    parse = markdownCache::parseBlockGroups,
                 ),
                 isBusy = detail.isBusy,
                 hasThread = detail.thread != null,

@@ -1,6 +1,8 @@
 package com.silverbullet.kode.feature.threads.domain
 
 import androidx.compose.runtime.Immutable
+import com.silverbullet.kode.core.designsystem.MarkdownBlockGroup
+import com.silverbullet.kode.core.model.ChatAttachment
 import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.OrchestrationLatestTurn
 import com.silverbullet.kode.core.model.OrchestrationMessage
@@ -27,6 +29,35 @@ sealed interface FeedEntry {
         // every interval rebuild, and a getter allocated a String each time.
         override val id: String = "message:" + message.id
         override val createdAt: String = message.createdAt
+    }
+
+    /**
+     * One markdown block of a settled assistant message.
+     *
+     * A settled message is exploded into one entry per top-level block by
+     * [splitSettledAssistantMessages], so the lazy list composes a paragraph
+     * at a time as the message scrolls in, instead of laying out the whole
+     * message in the frame its row first appears — which was the scroll hitch
+     * felt whenever a new turn entered the viewport.
+     */
+    @Immutable
+    data class MessageBlock(
+        val messageId: String,
+        val blockIndex: Int,
+        val block: MarkdownBlockGroup,
+        override val createdAt: String,
+    ) : FeedEntry {
+        override val id: String = "message:$messageId:block:$blockIndex"
+    }
+
+    /** The image strip of a settled assistant message, after its last block. */
+    @Immutable
+    data class MessageAttachments(
+        val messageId: String,
+        val attachments: List<ChatAttachment>,
+        override val createdAt: String,
+    ) : FeedEntry {
+        override val id: String = "message:$messageId:attachments"
     }
 
     @Immutable
@@ -87,6 +118,73 @@ fun buildFeed(
     val groups = groupAdjacentActivities(messages, collapsed)
     return present(groups, latestTurn, expansion)
 }
+
+/**
+ * Explodes settled assistant messages into per-block entries.
+ *
+ * Runs after [buildFeed], so only messages that survived turn folding are ever
+ * parsed. [parse] is expected to be cached and off the main thread — the feed
+ * pipeline already runs on a background dispatcher, which means every block
+ * that reaches the UI is parsed *before* it can be scrolled to. That closes
+ * both halves of the turn-entry hitch: no whole-message layout in the frame a
+ * row appears, and no zero-height "still parsing" placeholder for the lazy
+ * list to over-fill past.
+ *
+ * A null from [parse] (the parser errored) keeps the original entry, which
+ * falls back to the monolithic rendering path. User messages and messages
+ * still streaming are left untouched: the user bubble is plain text, and the
+ * streaming renderer needs the whole document to re-parse its unstable tail.
+ */
+suspend fun splitSettledAssistantMessages(
+    entries: List<FeedEntry>,
+    parse: suspend (cacheKey: String, text: String) -> List<MarkdownBlockGroup>?,
+): List<FeedEntry> {
+    if (entries.none { it.isSplittableMessage() }) return entries
+
+    val out = ArrayList<FeedEntry>(entries.size + 16)
+    for (entry in entries) {
+        if (entry !is FeedEntry.Message || !entry.isSplittableMessage()) {
+            out.add(entry)
+            continue
+        }
+
+        val message = entry.message
+        // Keyed on id *and* length, mirroring the render-side cache: a settled
+        // message reuses its parse forever, an edited one re-parses.
+        val groups = parse(message.id + ":" + message.text.length, message.text)
+        if (groups.isNullOrEmpty()) {
+            out.add(entry)
+            continue
+        }
+
+        groups.forEachIndexed { index, group ->
+            out.add(
+                FeedEntry.MessageBlock(
+                    messageId = message.id,
+                    blockIndex = index,
+                    block = group,
+                    createdAt = message.createdAt,
+                ),
+            )
+        }
+        if (message.attachments.isNotEmpty()) {
+            out.add(
+                FeedEntry.MessageAttachments(
+                    messageId = message.id,
+                    attachments = message.attachments,
+                    createdAt = message.createdAt,
+                ),
+            )
+        }
+    }
+    return out
+}
+
+private fun FeedEntry.isSplittableMessage(): Boolean =
+    this is FeedEntry.Message &&
+        message.role != MessageRole.USER &&
+        !message.streaming &&
+        message.text.isNotEmpty()
 
 // -------------------------------------------------------------- intermediates
 
