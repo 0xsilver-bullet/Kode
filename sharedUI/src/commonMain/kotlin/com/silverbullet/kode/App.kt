@@ -44,6 +44,7 @@ import com.silverbullet.kode.feature.connection.ui.EnvironmentsRoute
 import com.silverbullet.kode.feature.connection.ui.SettingsRoute
 import com.silverbullet.kode.feature.threads.ui.NewThreadRoute
 import com.silverbullet.kode.feature.threads.ui.ThreadDetailRoute
+import com.silverbullet.kode.feature.threads.ui.ThreadDetailTopBar
 import com.silverbullet.kode.feature.threads.ui.ThreadListRoute
 import com.silverbullet.kode.feature.voice.ui.VoicePromptEntry
 import com.silverbullet.kode.feature.voice.ui.VoiceSettingsRoute
@@ -193,10 +194,12 @@ private fun KodeNavHost() {
             val route = entry.toRoute<ThreadDetailDestination>()
             Scaffold(
                 topBar = {
-                    TopAppBar(
-                        title = { Text("Thread") },
+                    // The bar reads the thread's own title, so it belongs to the
+                    // feature that owns that state rather than to this graph.
+                    ThreadDetailTopBar(
+                        environmentId = EnvironmentId(route.environmentId),
+                        threadId = ThreadId(route.threadId),
                         actions = { ConnectionBadge() },
-                        windowInsets = TopAppBarDefaults.windowInsets,
                     )
                 },
                 // Same reasoning, plus the composer has to react to the IME,

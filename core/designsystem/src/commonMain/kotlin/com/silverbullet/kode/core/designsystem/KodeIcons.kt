@@ -164,15 +164,36 @@ object KodeIcons {
         }
     }
 
-    /** Settings: a gear reduced to a hub and four spokes. */
+    /**
+     * Settings: Tabler's `settings` gear — eight lobes around a hub.
+     *
+     * Two concentric circles with four stubby ticks, which is what this was,
+     * reads as a crosshair at 24dp, not a gear. The lobed outline is the shape
+     * people actually recognise, so it is transcribed from Tabler (T3 Code's
+     * icon set) rather than approximated: each lobe is a cubic pushing out from
+     * the hub, joined by the small arc that rounds its shoulder.
+     */
     val Gear: ImageVector by lazy {
         strokeIcon("Gear") {
-            circle(12f, 12f, 3.5f)
-            circle(12f, 12f, 7.5f)
-            moveTo(12f, 2.5f); lineTo(12f, 6f)
-            moveTo(12f, 18f); lineTo(12f, 21.5f)
-            moveTo(2.5f, 12f); lineTo(6f, 12f)
-            moveTo(18f, 12f); lineTo(21.5f, 12f)
+            moveTo(10.325f, 4.317f)
+            curveToRelative(0.426f, -1.756f, 2.924f, -1.756f, 3.35f, 0f)
+            arcToRelative(1.724f, 1.724f, 0f, false, false, 2.573f, 1.066f)
+            curveToRelative(1.543f, -0.94f, 3.31f, 0.826f, 2.37f, 2.37f)
+            arcToRelative(1.724f, 1.724f, 0f, false, false, 1.065f, 2.572f)
+            curveToRelative(1.756f, 0.426f, 1.756f, 2.924f, 0f, 3.35f)
+            arcToRelative(1.724f, 1.724f, 0f, false, false, -1.066f, 2.573f)
+            curveToRelative(0.94f, 1.543f, -0.826f, 3.31f, -2.37f, 2.37f)
+            arcToRelative(1.724f, 1.724f, 0f, false, false, -2.572f, 1.065f)
+            curveToRelative(-0.426f, 1.756f, -2.924f, 1.756f, -3.35f, 0f)
+            arcToRelative(1.724f, 1.724f, 0f, false, false, -2.573f, -1.066f)
+            curveToRelative(-1.543f, 0.94f, -3.31f, -0.826f, -2.37f, -2.37f)
+            arcToRelative(1.724f, 1.724f, 0f, false, false, -1.065f, -2.572f)
+            curveToRelative(-1.756f, -0.426f, -1.756f, -2.924f, 0f, -3.35f)
+            arcToRelative(1.724f, 1.724f, 0f, false, false, 1.066f, -2.573f)
+            curveToRelative(-0.94f, -1.543f, 0.826f, -3.31f, 2.37f, -2.37f)
+            curveToRelative(1f, 0.608f, 2.296f, 0.07f, 2.572f, -1.065f)
+            close()
+            circle(12f, 12f, 3f)
         }
     }
 

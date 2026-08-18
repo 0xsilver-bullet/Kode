@@ -37,7 +37,9 @@ import com.silverbullet.kode.feature.threads.domain.buildUserInputAnswers
 import com.silverbullet.kode.feature.threads.domain.toggleOption
 import com.silverbullet.kode.feature.threads.domain.SyncStatus
 import com.silverbullet.kode.feature.threads.domain.ThreadDetailState
+import com.silverbullet.kode.feature.threads.domain.ThreadHeader
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
+import com.silverbullet.kode.feature.threads.domain.buildThreadHeader
 import com.silverbullet.kode.feature.threads.domain.buildFeed
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,6 +81,31 @@ class ThreadDetailViewModel(
                 started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
                 initialValue = ThreadDetailState(),
             )
+
+    /**
+     * What the app bar shows: the thread's own title, with the project (and,
+     * when more than one environment is paired, the environment) beneath it.
+     *
+     * Combined with `shells` rather than read off `detail` alone so the title
+     * is already correct on the first frame — the shell subscription knows it
+     * before the thread snapshot arrives, which is how T3 Code's header never
+     * flashes a placeholder.
+     */
+    val header: StateFlow<ThreadHeader> =
+        combine(detail, repository.shells) { detail, shells ->
+            val environment = shells.firstOrNull { it.environmentId == environmentId }
+            buildThreadHeader(
+                thread = detail.thread,
+                shellThread = environment?.shell?.threads?.get(threadId),
+                projects = environment?.shell?.projects.orEmpty(),
+                environmentLabel = environment?.label,
+                multiEnvironment = shells.size > 1,
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = ThreadHeader(title = "Thread", subtitle = null),
+        )
 
     /** True while a stop request is in flight. */
     val interrupting: StateFlow<Boolean> = _interrupting.asStateFlow()
@@ -257,7 +284,6 @@ class ThreadDetailViewModel(
                     latestTurn = detail.thread?.latestTurn,
                     expansion = expanded,
                 ),
-                title = detail.thread?.title,
                 isBusy = detail.isBusy,
                 hasThread = detail.thread != null,
                 syncStatus = detail.status,
@@ -642,7 +668,6 @@ data class ThreadFeedUiState(
     /** The driver this thread is pinned to once started, if any. */
     val lockedDriver: String? = null,
     val optionDescriptors: List<ProviderOptionDescriptor> = emptyList(),
-    val title: String? = null,
     val isBusy: Boolean = false,
     val hasThread: Boolean = false,
     val syncStatus: SyncStatus = SyncStatus.Empty,

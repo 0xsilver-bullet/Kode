@@ -8,6 +8,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -454,7 +457,6 @@ private fun BottomBar(viewModel: VoicePromptViewModel, state: VoicePromptUiState
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // The config affordance anchors the bottom edge, per the spec.
@@ -465,54 +467,121 @@ private fun BottomBar(viewModel: VoicePromptViewModel, state: VoicePromptUiState
                     tint = if (configOpen) MaterialTheme.colorScheme.primary else KodeTheme.colors.muted,
                 )
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(4.dp))
 
-            when (state) {
-                is VoicePromptUiState.Recording -> {
-                    TextButton(onClick = viewModel::cancel) { Text("Cancel") }
-                    Button(onClick = viewModel::stopTalking) { Text("Done") }
-                }
+            // Flow, not Row: "Accept & send" beside two other actions overflows a phone's
+            // width, and a plain Row answers that by squeezing the last button until its
+            // label wraps to two lines — taller than its neighbours and butted against them.
+            // Here the actions keep their natural width and spill onto a second line instead.
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                when (state) {
+                    is VoicePromptUiState.Recording -> {
+                        TextButton(
+                            onClick = viewModel::cancel,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = TEXT_ACTION_PADDING,
+                        ) { ActionLabel("Cancel") }
+                        Button(
+                            onClick = viewModel::stopTalking,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = ACTION_PADDING,
+                        ) { ActionLabel("Done") }
+                    }
 
-                is VoicePromptUiState.Finalizing, is VoicePromptUiState.Refining -> {
-                    TextButton(onClick = viewModel::cancel) { Text("Cancel") }
-                }
+                    is VoicePromptUiState.Finalizing, is VoicePromptUiState.Refining -> {
+                        TextButton(
+                            onClick = viewModel::cancel,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = TEXT_ACTION_PADDING,
+                        ) { ActionLabel("Cancel") }
+                    }
 
-                is VoicePromptUiState.Review -> {
-                    TextButton(onClick = viewModel::decline, enabled = !state.isSending) { Text("Decline") }
-                    OutlinedButton(onClick = viewModel::edit, enabled = !state.isSending) { Text("Edit") }
-                    Button(onClick = viewModel::accept, enabled = !state.isSending) {
-                        if (state.isSending) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text("Accept & send")
+                    is VoicePromptUiState.Review -> {
+                        TextButton(
+                            onClick = viewModel::decline,
+                            enabled = !state.isSending,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = TEXT_ACTION_PADDING,
+                        ) { ActionLabel("Decline") }
+                        OutlinedButton(
+                            onClick = viewModel::edit,
+                            enabled = !state.isSending,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = ACTION_PADDING,
+                        ) { ActionLabel("Edit") }
+                        Button(
+                            onClick = viewModel::accept,
+                            enabled = !state.isSending,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = ACTION_PADDING,
+                        ) {
+                            if (state.isSending) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                ActionLabel("Accept & send")
+                            }
                         }
                     }
-                }
 
-                is VoicePromptUiState.Editing -> {
-                    TextButton(onClick = viewModel::decline, enabled = !state.isSending) { Text("Discard") }
-                    Button(
-                        onClick = viewModel::sendEdited,
-                        enabled = !state.isSending && state.draft.isNotBlank(),
-                    ) {
-                        if (state.isSending) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text("Send")
+                    is VoicePromptUiState.Editing -> {
+                        TextButton(
+                            onClick = viewModel::decline,
+                            enabled = !state.isSending,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = TEXT_ACTION_PADDING,
+                        ) { ActionLabel("Discard") }
+                        Button(
+                            onClick = viewModel::sendEdited,
+                            enabled = !state.isSending && state.draft.isNotBlank(),
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = ACTION_PADDING,
+                        ) {
+                            if (state.isSending) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                ActionLabel("Send")
+                            }
                         }
                     }
-                }
 
-                is VoicePromptUiState.Failed, VoicePromptUiState.PermissionDenied -> {
-                    TextButton(onClick = viewModel::cancel) { Text("Close") }
-                    Button(onClick = viewModel::retry) { Text("Try again") }
-                }
+                    is VoicePromptUiState.Failed, VoicePromptUiState.PermissionDenied -> {
+                        TextButton(
+                            onClick = viewModel::cancel,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = TEXT_ACTION_PADDING,
+                        ) { ActionLabel("Close") }
+                        Button(
+                            onClick = viewModel::retry,
+                            modifier = Modifier.height(ACTION_HEIGHT),
+                            contentPadding = ACTION_PADDING,
+                        ) { ActionLabel("Try again") }
+                    }
 
-                else -> TextButton(onClick = viewModel::cancel) { Text("Cancel") }
+                    else -> TextButton(
+                        onClick = viewModel::cancel,
+                        modifier = Modifier.height(ACTION_HEIGHT),
+                        contentPadding = TEXT_ACTION_PADDING,
+                    ) { ActionLabel("Cancel") }
+                }
             }
         }
     }
 }
+
+/** Every action keeps one line, so no button grows taller than the row it shares. */
+@Composable
+private fun ActionLabel(text: String) {
+    Text(text = text, maxLines = 1, softWrap = false)
+}
+
+private val ACTION_HEIGHT = 40.dp
+private val ACTION_PADDING = PaddingValues(horizontal = 18.dp)
+private val TEXT_ACTION_PADDING = PaddingValues(horizontal = 12.dp)
 
 /** Circular mic control shown beside the composer's send button. */
 @Composable
