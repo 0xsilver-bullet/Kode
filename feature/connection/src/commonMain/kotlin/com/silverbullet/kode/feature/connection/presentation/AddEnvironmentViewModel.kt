@@ -5,8 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.silverbullet.kode.feature.connection.domain.PairEnvironmentUseCase
 import com.silverbullet.kode.feature.connection.domain.PairingInput
-import com.silverbullet.kode.feature.connection.domain.QrCodeScanner
-import com.silverbullet.kode.feature.connection.domain.QrScanOutcome
+import com.silverbullet.kode.core.common.QrCodeScanner
+import com.silverbullet.kode.core.common.QrScanOutcome
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

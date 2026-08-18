@@ -1,4 +1,4 @@
-package com.silverbullet.kode.feature.connection.domain
+package com.silverbullet.kode.core.common
 
 /**
  * Platform QR scanning for the Add Environment screen.

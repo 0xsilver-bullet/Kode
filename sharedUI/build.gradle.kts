@@ -45,6 +45,7 @@ kotlin {
             api(project(":sharedLogic"))
             api(project(":feature:connection"))
             api(project(":feature:threads"))
+            api(project(":feature:voice"))
             api(project(":core:designsystem"))
 
             implementation(libs.compose.runtime)

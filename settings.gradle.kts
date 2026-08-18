@@ -45,6 +45,12 @@ include(":core:network")
 include(":core:datastore")
 include(":core:session")
 include(":core:designsystem")
+include(":core:voicecontract")
 
 include(":feature:connection")
 include(":feature:threads")
+include(":feature:voice")
+
+// The voice prompt server: a plain JVM Ktor app that streams mic audio to Deepgram and
+// refines transcripts through opencode. Lives here so it shares :core:voicecontract.
+include(":voiceserver")

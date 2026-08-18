@@ -1,8 +1,8 @@
 package com.silverbullet.kode.feature.connection.di
 
 import com.silverbullet.kode.feature.connection.domain.PairEnvironmentUseCase
-import com.silverbullet.kode.feature.connection.domain.QrCodeScanner
-import com.silverbullet.kode.feature.connection.domain.UnavailableQrCodeScanner
+import com.silverbullet.kode.core.common.QrCodeScanner
+import com.silverbullet.kode.core.common.UnavailableQrCodeScanner
 import com.silverbullet.kode.feature.connection.domain.UpdateEnvironmentUseCase
 import com.silverbullet.kode.feature.connection.presentation.AddEnvironmentViewModel
 import com.silverbullet.kode.feature.connection.presentation.EnvironmentsViewModel

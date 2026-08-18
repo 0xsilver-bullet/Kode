@@ -205,6 +205,21 @@ object KodeIcons {
             moveTo(9.5f, 6f); lineTo(15.5f, 12f); lineTo(9.5f, 18f)
         }
     }
+
+    /** Voice prompt: a capsule mic on its cradle. */
+    val Mic: ImageVector by lazy {
+        strokeIcon("Mic") {
+            moveTo(9f, 5f)
+            arcTo(3f, 3f, 0f, false, true, 15f, 5f)
+            lineTo(15f, 11f)
+            arcTo(3f, 3f, 0f, false, true, 9f, 11f)
+            close()
+            moveTo(5f, 11f)
+            arcTo(7f, 7f, 0f, false, false, 19f, 11f)
+            moveTo(12f, 18f); lineTo(12f, 21f)
+            moveTo(8f, 21f); lineTo(16f, 21f)
+        }
+    }
 }
 
 /** Approximates a circle with two half arcs, which is all `PathBuilder` offers. */

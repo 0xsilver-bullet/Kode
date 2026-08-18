@@ -13,6 +13,7 @@ import com.silverbullet.kode.core.session.di.ApplicationScopeQualifier
 import com.silverbullet.kode.core.session.di.sessionModule
 import com.silverbullet.kode.feature.connection.di.connectionModule
 import com.silverbullet.kode.feature.threads.di.threadsModule
+import com.silverbullet.kode.feature.voice.di.voiceModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import org.koin.core.KoinApplication
@@ -53,6 +54,7 @@ fun initKoin(platformModule: Module): KoinApplication {
             sessionModule,
             connectionModule,
             threadsModule,
+            voiceModule,
             platformModule,
         )
     }

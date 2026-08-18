@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.silverbullet.kode.core.common.DispatcherProvider
 import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.InteractionMode
+import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.ModelSelection
 import com.silverbullet.kode.core.model.ProviderOptionDescriptor
 import com.silverbullet.kode.core.model.RuntimeMode
@@ -69,6 +70,53 @@ class ThreadDetailViewModel(
 
     /** True while a stop request is in flight. */
     val interrupting: StateFlow<Boolean> = _interrupting.asStateFlow()
+
+    /**
+     * The thread's project directory on the environment's machine — the worktree when the
+     * thread runs in one, else the project's workspace root. Consumed by the voice prompt
+     * slot, which forwards it to the voice server for glossary/refinement context.
+     */
+    val projectDir: StateFlow<String?> =
+        combine(detail, repository.shells) { detail, shells ->
+            detail.thread?.worktreePath?.takeIf { it.isNotBlank() }
+                ?: detail.thread?.projectId?.let { projectId ->
+                    shells.firstOrNull { it.environmentId == environmentId }
+                        ?.shell?.projects?.get(projectId)?.workspaceRoot
+                }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = null,
+        )
+
+    /**
+     * A snapshot of the newest conversation turns as (role, text) pairs, oldest first —
+     * refinement context for a voice prompt. A snapshot, not a flow: it is read once at
+     * refine time, and the voice dialog must not become another thread subscriber.
+     */
+    fun recentMessagesSnapshot(limit: Int = 6): List<Pair<String, String>> =
+        detail.value.messages
+            .filter { it.text.isNotBlank() }
+            .takeLast(limit)
+            .map { message ->
+                val role = if (message.role == MessageRole.USER) "user" else "assistant"
+                role to message.text
+            }
+
+    /**
+     * Dispatches externally produced text (an accepted voice prompt) as a turn without
+     * touching the composer draft.
+     */
+    suspend fun sendExternal(text: String): Result<Unit> {
+        val current = feed.value
+        return repository.sendMessage(
+            environmentId = environmentId,
+            threadId = threadId,
+            text = text,
+            runtimeMode = current.runtimeMode ?: RuntimeMode.APPROVAL_REQUIRED,
+            interactionMode = current.interactionMode ?: InteractionMode.DEFAULT,
+        ).map { }
+    }
 
     /**
      * Exposed separately from [feed] on purpose.

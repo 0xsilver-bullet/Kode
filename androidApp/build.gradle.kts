@@ -15,6 +15,7 @@ dependencies {
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.koin.core)
+    implementation(libs.koin.android)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.core.ktx)
     implementation(libs.play.services.code.scanner)

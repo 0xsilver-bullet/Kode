@@ -4,8 +4,8 @@ import android.content.Context
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import com.silverbullet.kode.feature.connection.domain.QrCodeScanner
-import com.silverbullet.kode.feature.connection.domain.QrScanOutcome
+import com.silverbullet.kode.core.common.QrCodeScanner
+import com.silverbullet.kode.core.common.QrScanOutcome
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 

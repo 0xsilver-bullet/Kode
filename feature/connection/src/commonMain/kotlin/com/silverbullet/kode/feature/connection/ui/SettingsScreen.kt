@@ -38,6 +38,7 @@ import org.koin.compose.koinInject
 @Composable
 fun SettingsRoute(
     onOpenEnvironments: () -> Unit,
+    onOpenVoice: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // The fleet's state flows are already lifecycle-friendly; a view model here
@@ -58,6 +59,11 @@ fun SettingsRoute(
                 label = "Environments",
                 value = environments?.size?.toString() ?: "",
                 onClick = onOpenEnvironments,
+            )
+            SettingsRow(
+                icon = KodeIcons.Mic,
+                label = "Voice",
+                onClick = onOpenVoice,
             )
         }
     }

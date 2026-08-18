@@ -41,6 +41,9 @@ import com.silverbullet.kode.feature.connection.ui.SettingsRoute
 import com.silverbullet.kode.feature.threads.ui.NewThreadRoute
 import com.silverbullet.kode.feature.threads.ui.ThreadDetailRoute
 import com.silverbullet.kode.feature.threads.ui.ThreadListRoute
+import com.silverbullet.kode.feature.voice.ui.VoicePromptEntry
+import com.silverbullet.kode.feature.voice.ui.VoiceSettingsRoute
+import com.silverbullet.kode.voice.contract.VoiceThreadMessage
 import kotlinx.serialization.Serializable
 import org.koin.compose.koinInject
 
@@ -62,6 +65,9 @@ private data object SettingsEnvironmentsDestination
 
 @Serializable
 private data object AddEnvironmentDestination
+
+@Serializable
+private data object VoiceSettingsDestination
 
 /**
  * The app shell.
@@ -183,6 +189,21 @@ private fun KodeNavHost() {
                     environmentId = EnvironmentId(route.environmentId),
                     threadId = ThreadId(route.threadId),
                     modifier = Modifier.fillMaxSize().padding(padding),
+                    // The adapter between the two feature modules: threads exposes a
+                    // primitive context, voice consumes primitives. Neither sees the other.
+                    voiceComposerSlot = { context ->
+                        VoicePromptEntry(
+                            environmentId = context.environmentId,
+                            threadKey = context.threadId.value,
+                            projectDir = context.projectDir,
+                            recentMessages = {
+                                context.recentMessages().map { (role, text) ->
+                                    VoiceThreadMessage(role = role, text = text)
+                                }
+                            },
+                            sendPrompt = context.sendPrompt,
+                        )
+                    },
                 )
             }
         }
@@ -192,6 +213,9 @@ private fun KodeNavHost() {
                 SettingsRoute(
                     onOpenEnvironments = {
                         navController.navigate(SettingsEnvironmentsDestination)
+                    },
+                    onOpenVoice = {
+                        navController.navigate(VoiceSettingsDestination)
                     },
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
@@ -220,6 +244,12 @@ private fun KodeNavHost() {
                     onAdded = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
+            }
+        }
+
+        composable<VoiceSettingsDestination> {
+            SubScreenScaffold(navController = navController, title = "Voice") { padding ->
+                VoiceSettingsRoute(modifier = Modifier.fillMaxSize().padding(padding))
             }
         }
     }

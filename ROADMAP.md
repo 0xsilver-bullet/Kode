@@ -284,6 +284,32 @@ watching. Not modelled anywhere yet.
 
 ---
 
+## Voice prompts
+
+### Implemented shape
+`:feature:voice` + `:core:voicecontract` + `:voiceserver` (see `voiceserver/README.md`).
+The mic button reaches the thread composer through a slot (`VoiceComposerSlot` in
+`:feature:threads`, adapted in `sharedUI/App.kt`) so the two feature modules stay
+independent. Voice bindings live in their own DataStore key — **not** on
+`EnvironmentRecord`, because `EnvironmentFleet` reconciles supervisors by record
+equality and would re-dial the RPC socket on every binding edit.
+
+### Deferred
+- **Reconnect mid-utterance.** A dropped voice socket while recording surfaces as a
+  retryable failure; audio between drop and retry is lost. Deepgram sockets are cheap —
+  a seamless resume would reopen and continue the same dialog.
+- **Voice on the New Thread screen.** The entry point is the thread composer only.
+- **iOS capture.** `AudioRecorder`/`MicPermission` follow the QrCodeScanner pattern
+  (interface + Koin platform override); iOS needs `AVAudioEngine` actuals, an
+  `NSMicrophoneUsageDescription`, and an iOS DI entry point — which does not exist yet
+  for any capability.
+- **Keyterm staleness.** The server rebuilds a project glossary when git HEAD moves or
+  after a 15-minute TTL; renames inside one commit window can leave stale keyterms.
+- **Voice server token rotation/revocation UI.** Tokens can be revoked only by editing
+  `~/.kode-voice/clients.json`.
+
+---
+
 ## Platform & infrastructure
 
 ### iOS UI

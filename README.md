@@ -19,6 +19,7 @@ none of it lives on the client.
 │ :sharedUI          shell, navigation, DI      │
 │ :feature:threads   list, timeline, composer   │
 │ :feature:connection pairing + status          │
+│ :feature:voice     voice prompts (dictation)  │
 ├───────────────────────────────────────────────┤
 │ :core:designsystem Kanagawa theme + markdown  │
 │ :core:session      connection supervisor      │
@@ -26,8 +27,14 @@ none of it lives on the client.
 │ :core:network      Ktor, auth ladder, socket  │
 │ :core:rpc          Effect RPC codec + client  │
 │ :core:model        contract DTOs + stream     │
+│ :core:voicecontract voice wire protocol DTOs  │
 │ :core:common       dispatchers, ids, clock    │
 └───────────────────────────────────────────────┘
+
+`:voiceserver` is a standalone Ktor JVM app (not part of the client graph): it proxies
+mic audio to Deepgram Nova-3 and refines transcripts through opencode. One instance runs
+per environment, next to that environment's server, and binds to it from
+**Settings → Voice**. See [voiceserver/README.md](./voiceserver/README.md).
 
 `:sharedLogic` is an umbrella that re-exports the `:core` modules as the `SharedLogic` framework
 for iOS; it holds no code of its own.

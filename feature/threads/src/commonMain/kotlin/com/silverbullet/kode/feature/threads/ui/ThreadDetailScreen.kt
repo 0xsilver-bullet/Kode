@@ -101,6 +101,7 @@ fun ThreadDetailRoute(
     environmentId: EnvironmentId,
     threadId: ThreadId,
     modifier: Modifier = Modifier,
+    voiceComposerSlot: VoiceComposerSlot? = null,
     viewModel: ThreadDetailViewModel = koinViewModel { parametersOf(environmentId, threadId) },
 ) {
     val feed by viewModel.feed.collectAsStateWithLifecycle()
@@ -142,6 +143,20 @@ fun ThreadDetailRoute(
                 )
             } else {
                 val composerState by viewModel.composer.collectAsStateWithLifecycle()
+                val voiceButton: (@Composable () -> Unit)? = voiceComposerSlot?.let { slot ->
+                    {
+                        val projectDir by viewModel.projectDir.collectAsStateWithLifecycle()
+                        slot(
+                            VoiceComposerContext(
+                                environmentId = environmentId,
+                                threadId = threadId,
+                                projectDir = projectDir,
+                                recentMessages = viewModel::recentMessagesSnapshot,
+                                sendPrompt = viewModel::sendExternal,
+                            ),
+                        )
+                    }
+                }
                 Composer(
                     state = composerState,
                     config = ThreadConfig(
@@ -159,6 +174,7 @@ fun ThreadDetailRoute(
                     onRuntimeModeSelected = viewModel::selectRuntimeMode,
                     onInteractionModeSelected = viewModel::selectInteractionMode,
                     modifier = footerModifier,
+                    voiceButton = voiceButton,
                 )
             }
         },
@@ -583,6 +599,7 @@ private fun Composer(
     onRuntimeModeSelected: (String) -> Unit,
     onInteractionModeSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
+    voiceButton: (@Composable () -> Unit)? = null,
 ) {
     var sheetOpen by remember { mutableStateOf(false) }
     val colors = KodeTheme.colors
@@ -639,6 +656,10 @@ private fun Composer(
                 onClick = { sheetOpen = true },
                 modifier = Modifier.weight(1f),
             )
+
+            // The voice prompt entry, injected by sharedUI; absent when the
+            // environment has no voice server bound.
+            voiceButton?.invoke()
 
             SendButton(
                 enabled = state.canSend,
