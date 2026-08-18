@@ -3,6 +3,7 @@ package com.silverbullet.kode.feature.threads.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,6 +56,7 @@ private sealed interface OpenPicker {
 fun NewThreadRoute(
     onCreated: (EnvironmentId, ThreadId) -> Unit,
     modifier: Modifier = Modifier,
+    voiceComposerSlot: VoiceComposerSlot? = null,
     viewModel: NewThreadViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -66,6 +68,35 @@ fun NewThreadRoute(
         viewModel.onNavigated()
         onCreated(created.environmentId, created.threadId)
     }
+
+    // A new thread has no id yet; the voice dialog only uses `threadKey` to scope
+    // its own ViewModel, so a stable placeholder keeps it separate from any
+    // existing thread's voice session.
+    val voiceButton: (@Composable () -> Unit)? =
+        uiState.environmentId?.let { envId -> voiceComposerSlot?.let { slot ->
+            {
+                slot(
+                    VoiceComposerContext(
+                        environmentId = envId,
+                        threadId = NewThreadVoiceKey,
+                        projectDir = uiState.projects
+                            .firstOrNull { it.id == uiState.projectId }?.workspaceRoot,
+                        recentMessages = { emptyList() },
+                        attachmentPreviews = uiState.attachments.map { it.previewUri },
+                        // "Accept & send" in the dialog fills the first-message
+                        // field rather than dispatching: a thread that does not
+                        // exist yet cannot take a turn, and project/model may
+                        // still be unset when the user records. The staged
+                        // attachments already live in the form and ride along
+                        // when the user taps "Start thread".
+                        sendPrompt = { text ->
+                            viewModel.setMessageFromVoice(text)
+                            Result.success(Unit)
+                        },
+                    ),
+                )
+            }
+        } }
 
     NewThreadScreen(
         uiState = uiState,
@@ -80,8 +111,12 @@ fun NewThreadRoute(
         onInteractionModeSelected = viewModel::onInteractionModeSelected,
         onCreate = viewModel::create,
         modifier = modifier,
+        voiceButton = voiceButton,
     )
 }
+
+/** Stable key for the new-thread voice session; never collides with a real `ThreadId`. */
+private val NewThreadVoiceKey = ThreadId("__new-thread__")
 
 @Composable
 fun NewThreadScreen(
@@ -97,6 +132,7 @@ fun NewThreadScreen(
     onInteractionModeSelected: (String) -> Unit,
     onCreate: () -> Unit,
     modifier: Modifier = Modifier,
+    voiceButton: (@Composable () -> Unit)? = null,
 ) {
     var picker by remember { mutableStateOf<OpenPicker>(OpenPicker.None) }
     var previewAttachment by remember { mutableStateOf<DraftAttachment?>(null) }
@@ -194,21 +230,31 @@ fun NewThreadScreen(
             }
         }
 
-        Button(
-            onClick = onCreate,
-            enabled = uiState.canCreate,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (uiState.isSubmitting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(end = 8.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
+            // The voice prompt entry, injected by sharedUI; absent when the
+            // environment has no voice server bound. Mirrors the composer layout.
+            voiceButton?.invoke()
+
+            Button(
+                onClick = onCreate,
+                enabled = uiState.canCreate,
+                modifier = Modifier.weight(1f),
+            ) {
+                if (uiState.isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(end = 8.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                Text("Start thread")
             }
-            Text("Start thread")
         }
     }
 

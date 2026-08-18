@@ -186,6 +186,24 @@ private fun KodeNavHost() {
                         )
                     },
                     modifier = Modifier.fillMaxSize().padding(padding),
+                    // Same adapter as the thread composer: threads exposes a
+                    // primitive context, voice consumes primitives. The
+                    // new-thread screen uses it to fill the first-message field
+                    // rather than dispatch a turn (see NewThreadRoute).
+                    voiceComposerSlot = { context ->
+                        VoicePromptEntry(
+                            environmentId = context.environmentId,
+                            threadKey = context.threadId.value,
+                            projectDir = context.projectDir,
+                            recentMessages = {
+                                context.recentMessages().map { (role, text) ->
+                                    VoiceThreadMessage(role = role, text = text)
+                                }
+                            },
+                            attachmentPreviews = context.attachmentPreviews,
+                            sendPrompt = context.sendPrompt,
+                        )
+                    },
                 )
             }
         }

@@ -139,6 +139,20 @@ class NewThreadViewModel(
         form.value = form.value.copy(message = value, error = null)
     }
 
+    /**
+     * Fills the first-message field from an accepted voice prompt.
+     *
+     * Mirrors [onMessageChanged] but is `suspend` to satisfy the voice dialog's
+     * `sendPrompt` contract. In a new thread the accepted transcript does not
+     * dispatch a turn — the thread cannot take one until it exists — so it
+     * lands in the form for the user to review alongside project/model before
+     * tapping "Start thread". Staged attachments already live in [NewThreadForm]
+     * and ride along when [create] runs.
+     */
+    suspend fun setMessageFromVoice(text: String) {
+        form.value = form.value.copy(message = text, error = null)
+    }
+
     /** Stages images for the first message. Mirrors the thread composer's picker. */
     fun onPickImages() {
         val staged = form.value.attachments
