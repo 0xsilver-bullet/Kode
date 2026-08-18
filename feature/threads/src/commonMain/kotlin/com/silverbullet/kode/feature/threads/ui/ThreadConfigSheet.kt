@@ -22,6 +22,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,80 +81,100 @@ fun ThreadConfigSheet(
     // Which sub-list is open, if any. A drill-in rather than a second sheet so
     // the choice lands back in context.
     var detail by remember { mutableStateOf<String?>(null) }
+    // One scroll state per pane, hoisted above the pane swap. The root list is
+    // far taller than any drill-in, so sharing a single state let the shrinking
+    // content clamp the offset to zero and the model list always came back from
+    // the top. While a drill-in is showing the root state is simply detached,
+    // and therefore never re-clamped.
+    val rootScroll = rememberScrollState()
+    val detailScroll = rememberScrollState()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 560.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 16.dp),
-        ) {
-            when (val open = detail) {
-                null -> ConfigRoot(
-                    config = config,
-                    showLegacy = showLegacy,
-                    onToggleLegacy = { showLegacy = !showLegacy },
-                    onModelSelected = onModelSelected,
-                    onOptionSelected = onOptionSelected,
-                    onOpenDetail = { detail = it },
-                )
+        val open = detail
+        // A fresh drill-in always starts at its own top.
+        LaunchedEffect(open) {
+            if (open != null) detailScroll.scrollTo(0)
+        }
 
-                RUNTIME_DETAIL -> DetailList(
-                    title = "Runtime",
-                    entries = RUNTIME_MODE_CHOICES.map { Triple(it.mode, it.label, it.description) },
-                    selectedId = config.runtimeMode,
-                    onBack = { detail = null },
-                    onSelect = {
-                        onRuntimeModeSelected(it)
-                        detail = null
-                    },
-                )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(if (open == null) rootScroll else detailScroll),
+            ) {
+                when (open) {
+                    null -> ConfigRoot(
+                        config = config,
+                        showLegacy = showLegacy,
+                        onToggleLegacy = { showLegacy = !showLegacy },
+                        onModelSelected = onModelSelected,
+                        onOptionSelected = onOptionSelected,
+                        onOpenDetail = { detail = it },
+                    )
 
-                MODE_DETAIL -> DetailList(
-                    title = "Mode",
-                    entries = INTERACTION_MODE_CHOICES.map {
-                        Triple(it.mode, it.label, it.description)
-                    },
-                    selectedId = config.interactionMode,
-                    onBack = { detail = null },
-                    onSelect = {
-                        onInteractionModeSelected(it)
-                        detail = null
-                    },
-                )
+                    RUNTIME_DETAIL -> DetailList(
+                        title = "Runtime",
+                        entries = RUNTIME_MODE_CHOICES.map {
+                            Triple(it.mode, it.label, it.description)
+                        },
+                        selectedId = config.runtimeMode,
+                        onBack = { detail = null },
+                        onSelect = {
+                            onRuntimeModeSelected(it)
+                            detail = null
+                        },
+                    )
 
-                else -> {
-                    val descriptor = config.optionDescriptors.firstOrNull { it.id == open }
-                    if (descriptor == null) {
-                        detail = null
-                    } else {
-                        DetailList(
-                            title = descriptor.label,
-                            entries = descriptor.selectableChoices().map {
-                                Triple(it.id, it.label, it.description)
-                            },
-                            selectedId = descriptor.currentValueOrDefault()
-                                ?.takeIf { it.isString }?.content,
-                            onBack = { detail = null },
-                            onSelect = {
-                                onOptionSelected(descriptor.id, JsonPrimitive(it))
-                                detail = null
-                            },
-                        )
+                    MODE_DETAIL -> DetailList(
+                        title = "Mode",
+                        entries = INTERACTION_MODE_CHOICES.map {
+                            Triple(it.mode, it.label, it.description)
+                        },
+                        selectedId = config.interactionMode,
+                        onBack = { detail = null },
+                        onSelect = {
+                            onInteractionModeSelected(it)
+                            detail = null
+                        },
+                    )
+
+                    else -> {
+                        val descriptor = config.optionDescriptors.firstOrNull { it.id == open }
+                        if (descriptor == null) {
+                            // The option vanished under us (model switched while
+                            // drilled in); fall back to the root on the next frame.
+                            LaunchedEffect(open) { detail = null }
+                        } else {
+                            DetailList(
+                                title = descriptor.label,
+                                entries = descriptor.selectableChoices().map {
+                                    Triple(it.id, it.label, it.description)
+                                },
+                                selectedId = descriptor.currentValueOrDefault()
+                                    ?.takeIf { it.isString }?.content,
+                                onBack = { detail = null },
+                                onSelect = {
+                                    onOptionSelected(descriptor.id, JsonPrimitive(it))
+                                    detail = null
+                                },
+                            )
+                        }
                     }
                 }
             }
 
+            // Outside the scroller: reaching Done used to mean scrolling past
+            // the entire model list.
             Button(
                 onClick = onDismiss,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
             ) {
                 Text("Done")
             }
