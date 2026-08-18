@@ -1,5 +1,6 @@
 package com.silverbullet.kode.feature.threads.domain
 
+import com.silverbullet.kode.core.model.ChatAttachment
 import com.silverbullet.kode.core.model.InteractionMode
 import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.ModelSelection
@@ -43,6 +44,27 @@ class ThreadDetailStateTest {
         assertEquals(1, assistantMessages.size)
         assertEquals("Reading the contracts", assistantMessages.single().text)
         assertFalse(assistantMessages.single().streaming)
+    }
+
+    @Test
+    fun `a later event without attachments keeps the ones a message already had`() {
+        // Streaming deltas carry no attachments at all, so an empty list means
+        // "not mentioned", not "removed". Taking it literally would blank the
+        // images on a user message as soon as anything else touched it.
+        var state = ThreadDetailState().reduce(snapshotItem())
+
+        val attachment = ChatAttachment(
+            id = "att_1",
+            name = "a.png",
+            mimeType = "image/png",
+            sizeBytes = 12,
+        )
+        state = state.reduce(
+            messageEvent(sequence = 2, text = "look", attachments = listOf(attachment)),
+        )
+        state = state.reduce(messageEvent(sequence = 3, text = "look again"))
+
+        assertEquals(listOf(attachment), state.messages.single { it.id == "m2" }.attachments)
     }
 
     @Test
@@ -308,6 +330,7 @@ class ThreadDetailStateTest {
         text: String,
         streaming: Boolean = false,
         turnId: String? = null,
+        attachments: List<ChatAttachment> = emptyList(),
         createdAt: String = "2026-08-15T10:00:10.000Z",
     ) = ThreadStreamItem.Event(
         OrchestrationEvent.MessageSent(
@@ -319,6 +342,7 @@ class ThreadDetailStateTest {
                 text = text,
                 turnId = turnId,
                 streaming = streaming,
+                attachments = attachments,
                 createdAt = createdAt,
                 updatedAt = createdAt,
             ),

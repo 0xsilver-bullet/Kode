@@ -28,6 +28,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import coil3.ImageLoader
+import coil3.compose.setSingletonImageLoaderFactory
+import coil3.network.ktor3.KtorNetworkFetcherFactory
+import io.ktor.client.HttpClient
 import com.silverbullet.kode.core.designsystem.KodeIcons
 import com.silverbullet.kode.core.designsystem.KodeTheme
 import com.silverbullet.kode.core.model.EnvironmentId
@@ -87,6 +91,21 @@ private data object VoiceSettingsDestination
 @Composable
 @Preview
 fun App() {
+    // Coil's singleton loader needs a network fetcher wired to a Ktor engine;
+    // without one, every asset URL fails to load with no visible error. Set at
+    // the root so both the composer's thumbnails and the feed's sent images
+    // share one loader — and therefore one memory and disk cache.
+    // Resolved outside the factory lambda: that lambda is not composable, and
+    // reusing the app's single client keeps attachment fetches on the same
+    // connection pool as the RPC socket. It carries no auth plugin, which is
+    // what makes it safe here — asset URLs are signed, not bearer-authorized.
+    val httpClient = koinInject<HttpClient>()
+    setSingletonImageLoaderFactory { context ->
+        ImageLoader.Builder(context)
+            .components { add(KtorNetworkFetcherFactory(httpClient = { httpClient })) }
+            .build()
+    }
+
     KodeTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             val fleet = koinInject<EnvironmentFleet>()
@@ -201,6 +220,7 @@ private fun KodeNavHost() {
                                     VoiceThreadMessage(role = role, text = text)
                                 }
                             },
+                            attachmentPreviews = context.attachmentPreviews,
                             sendPrompt = context.sendPrompt,
                         )
                     },

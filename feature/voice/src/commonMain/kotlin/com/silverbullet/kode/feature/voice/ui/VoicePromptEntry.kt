@@ -29,6 +29,12 @@ fun VoicePromptEntry(
     threadKey: String,
     projectDir: String?,
     recentMessages: () -> List<VoiceThreadMessage>,
+    /**
+     * Previews of images already staged in the composer, shown read-only while
+     * reviewing so the user can see what the prompt will carry. Picking and
+     * removing stay in the composer.
+     */
+    attachmentPreviews: List<String> = emptyList(),
     sendPrompt: suspend (String) -> Result<Unit>,
 ) {
     val bindingStore = koinInject<VoiceBindingStore>()
@@ -48,6 +54,7 @@ fun VoicePromptEntry(
 
         VoicePromptDialog(
             viewModel = viewModel,
+            attachmentPreviews = attachmentPreviews,
             onDismissed = { dialogOpen = false },
         )
     }

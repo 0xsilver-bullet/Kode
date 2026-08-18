@@ -102,6 +102,16 @@ class EnvironmentFleet(
             ?.firstOrNull { it.environmentId == environmentId }
             ?.session?.value
 
+    /**
+     * The stored record for one environment, for callers that need its address
+     * rather than its session — resolving a signed asset URL against the
+     * environment's HTTP base, for instance.
+     */
+    fun recordNow(environmentId: EnvironmentId): EnvironmentRecord? =
+        _environments.value
+            ?.firstOrNull { it.environmentId == environmentId }
+            ?.record
+
     fun retryNow(environmentId: EnvironmentId) {
         _environments.value
             ?.firstOrNull { it.environmentId == environmentId }

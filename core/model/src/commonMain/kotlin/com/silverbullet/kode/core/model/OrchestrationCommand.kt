@@ -209,13 +209,20 @@ object ApprovalDecision {
     const val CANCEL = "cancel"
 }
 
+/**
+ * The user message a turn starts from.
+ *
+ * [attachments] takes the *upload* shape, not the one messages carry: the bytes
+ * travel inline as data URLs on this one command, and the server answers with
+ * [ChatAttachment]s that have ids. There is no separate upload endpoint to call
+ * first.
+ */
 @Serializable
 data class UserMessageInput(
     val messageId: String,
     val text: String,
     val role: String = MessageRole.USER,
-    /** Attachments are not implemented yet; the field is required on the wire. */
-    val attachments: List<String> = emptyList(),
+    val attachments: List<UploadChatImageAttachment> = emptyList(),
 )
 
 /**

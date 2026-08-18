@@ -120,6 +120,7 @@ private data class ThreadMessageSentPayload(
     val text: String = "",
     val turnId: String? = null,
     val streaming: Boolean = false,
+    val attachments: List<ChatAttachment> = emptyList(),
     val createdAt: String,
     val updatedAt: String,
 ) {
@@ -129,6 +130,7 @@ private data class ThreadMessageSentPayload(
         text = text,
         turnId = turnId,
         streaming = streaming,
+        attachments = attachments,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

@@ -18,7 +18,16 @@ class VoiceComposerContext(
     val projectDir: String?,
     /** Newest turns as (role, text), oldest first; read at refine time. */
     val recentMessages: () -> List<Pair<String, String>>,
-    /** Dispatches an accepted voice prompt as a turn. */
+    /**
+     * Platform preview handles for the images staged in the composer.
+     *
+     * The voice feature only *shows* these — it never picks or removes. Images
+     * are attached in the composer before recording, and [sendPrompt] carries
+     * whatever is staged when it runs, which is what lets "attach, then talk"
+     * work without the dialog growing a picker of its own.
+     */
+    val attachmentPreviews: List<String>,
+    /** Dispatches an accepted voice prompt, plus any staged images, as a turn. */
     val sendPrompt: suspend (String) -> Result<Unit>,
 )
 

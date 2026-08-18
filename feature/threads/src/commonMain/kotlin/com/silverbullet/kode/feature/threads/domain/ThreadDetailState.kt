@@ -172,6 +172,10 @@ private fun ThreadDetailState.upsertMessage(message: OrchestrationMessage): Thre
         },
         streaming = message.streaming,
         turnId = message.turnId ?: existing.turnId,
+        // Streaming deltas carry no attachments, so an empty list means "not
+        // mentioned" rather than "removed" — dropping them here would blank the
+        // images on a user message the moment the reply started arriving.
+        attachments = message.attachments.ifEmpty { existing.attachments },
         // Deltas reuse the command timestamp; only the closing event is a
         // meaningful "last touched" time.
         updatedAt = if (message.streaming) existing.updatedAt else message.updatedAt,

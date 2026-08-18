@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,8 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -47,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import com.silverbullet.kode.core.designsystem.KodeIcons
 import com.silverbullet.kode.core.designsystem.KodeTheme
 import com.silverbullet.kode.feature.voice.domain.Transcript
@@ -66,6 +70,7 @@ import kotlinx.coroutines.flow.StateFlow
 fun VoicePromptDialog(
     viewModel: VoicePromptViewModel,
     onDismissed: () -> Unit,
+    attachmentPreviews: List<String> = emptyList(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -126,10 +131,14 @@ fun VoicePromptDialog(
                             }
                         }
 
-                        is VoicePromptUiState.Review -> ReviewPane(current)
+                        is VoicePromptUiState.Review -> ReviewPane(
+                            state = current,
+                            attachmentPreviews = attachmentPreviews,
+                        )
 
                         is VoicePromptUiState.Editing -> EditPane(
                             state = current,
+                            attachmentPreviews = attachmentPreviews,
                             onDraftChanged = viewModel::onDraftChanged,
                         )
 
@@ -208,7 +217,10 @@ private fun TranscriptText(text: String, muted: Boolean) {
 }
 
 @Composable
-private fun ReviewPane(state: VoicePromptUiState.Review) {
+private fun ReviewPane(
+    state: VoicePromptUiState.Review,
+    attachmentPreviews: List<String>,
+) {
     Column(modifier = Modifier.fillMaxSize()) {
         if (state.refineFailed) {
             Text(
@@ -233,6 +245,7 @@ private fun ReviewPane(state: VoicePromptUiState.Review) {
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState()),
         )
+        AttachmentChip(attachmentPreviews)
         state.error?.let { error ->
             Text(
                 text = error,
@@ -247,6 +260,7 @@ private fun ReviewPane(state: VoicePromptUiState.Review) {
 @Composable
 private fun EditPane(
     state: VoicePromptUiState.Editing,
+    attachmentPreviews: List<String>,
     onDraftChanged: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -269,6 +283,7 @@ private fun EditPane(
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             )
         }
+        AttachmentChip(attachmentPreviews)
         state.error?.let { error ->
             Text(
                 text = error,
@@ -279,6 +294,61 @@ private fun EditPane(
         }
     }
 }
+
+/**
+ * A read-only reminder of what the prompt will carry.
+ *
+ * Deliberately inert: no picker, no remove. Images are staged in the composer
+ * *before* recording, and the dialog's job is to make that visible at the
+ * moment of sending, not to become a second attachment surface. Anything beyond
+ * four thumbnails collapses into a count, so a full set of eight cannot crowd
+ * out the transcript.
+ */
+@Composable
+private fun AttachmentChip(previews: List<String>) {
+    if (previews.isEmpty()) return
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .background(
+                MaterialTheme.colorScheme.surfaceContainerHigh,
+                RoundedCornerShape(14.dp),
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            previews.take(MAX_ATTACHMENT_THUMBNAILS).forEach { preview ->
+                AsyncImage(
+                    model = preview,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                )
+            }
+        }
+        Text(
+            text = if (previews.size == 1) {
+                "1 image will be sent"
+            } else {
+                "${previews.size} images will be sent"
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = KodeTheme.colors.muted,
+        )
+    }
+}
+
+private const val MAX_ATTACHMENT_THUMBNAILS = 4
 
 @Composable
 private fun CenteredStatus(message: String) {

@@ -1,5 +1,8 @@
 package com.silverbullet.kode.core.network
 
+import com.silverbullet.kode.core.model.AssetCreateUrlInput
+import com.silverbullet.kode.core.model.AssetCreateUrlResult
+import com.silverbullet.kode.core.model.AssetResource
 import com.silverbullet.kode.core.model.ClientOrchestrationCommand
 import com.silverbullet.kode.core.model.DispatchResult
 import com.silverbullet.kode.core.model.OrchestrationStreamDecoder
@@ -95,6 +98,25 @@ class T3EnvironmentClient(
         Methods.DISPATCH_COMMAND,
     )
 
+    /**
+     * `assets.createUrl` — a short-lived, signed URL for one attachment.
+     *
+     * The returned [AssetCreateUrlResult.relativeUrl] is relative to the
+     * environment's HTTP base and carries its own signature, so fetching it
+     * needs no bearer header. It expires after an hour, which is why callers
+     * cache the URL rather than treat it as stable.
+     */
+    suspend fun createAssetUrl(resource: AssetResource): AssetCreateUrlResult = decode(
+        connection.request(
+            Methods.ASSETS_CREATE_URL,
+            json.encodeToJsonElement(
+                AssetCreateUrlInput.serializer(),
+                AssetCreateUrlInput(resource),
+            ),
+        ),
+        Methods.ASSETS_CREATE_URL,
+    )
+
     // ------------------------------------------------------------------ helpers
 
     private inline fun <reified T> decode(element: JsonElement?, method: String): T {
@@ -111,6 +133,8 @@ class T3EnvironmentClient(
         const val SUBSCRIBE_SHELL = "orchestration.subscribeShell"
         const val SUBSCRIBE_THREAD = "orchestration.subscribeThread"
         const val DISPATCH_COMMAND = "orchestration.dispatchCommand"
+
+        const val ASSETS_CREATE_URL = "assets.createUrl"
     }
 
     companion object {

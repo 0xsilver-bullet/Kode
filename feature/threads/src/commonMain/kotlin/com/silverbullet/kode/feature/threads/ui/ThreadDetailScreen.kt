@@ -42,6 +42,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +68,7 @@ import com.silverbullet.kode.feature.threads.domain.currentLabel
 import com.silverbullet.kode.feature.threads.domain.currentValueOrDefault
 import com.silverbullet.kode.feature.threads.domain.runtimeModeLabel
 import com.silverbullet.kode.feature.threads.domain.selectableChoices
+import com.silverbullet.kode.feature.threads.domain.DraftAttachment
 import com.silverbullet.kode.feature.threads.presentation.ComposerState
 import com.silverbullet.kode.feature.threads.presentation.ThreadDetailViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadFeedUiState
@@ -113,6 +115,7 @@ fun ThreadDetailRoute(
         onToggleTurn = viewModel::toggleTurn,
         onToggleWorkGroup = viewModel::toggleWorkGroup,
         onInterrupt = viewModel::interruptTurn,
+        resolveAttachmentUrl = viewModel::attachmentUrl,
         modifier = modifier,
         footer = { footerModifier ->
             // Both collect their own state, so a keystroke never reaches the
@@ -152,6 +155,11 @@ fun ThreadDetailRoute(
                                 threadId = threadId,
                                 projectDir = projectDir,
                                 recentMessages = viewModel::recentMessagesSnapshot,
+                                // Read from composer state rather than the
+                                // snapshot lambda, so staging an image while the
+                                // mic button is on screen updates its chip.
+                                attachmentPreviews = composerState.attachments
+                                    .map { it.previewUri },
                                 sendPrompt = viewModel::sendExternal,
                             ),
                         )
@@ -169,6 +177,9 @@ fun ThreadDetailRoute(
                     ),
                     onDraftChanged = viewModel::onDraftChanged,
                     onSend = viewModel::send,
+                    onPickImages = viewModel::onPickImages,
+                    onRemoveAttachment = viewModel::onRemoveAttachment,
+                    canAttach = viewModel.canAttachImages,
                     onModelSelected = viewModel::selectModel,
                     onModelOptionSelected = viewModel::selectModelOption,
                     onRuntimeModeSelected = viewModel::selectRuntimeMode,
@@ -188,10 +199,14 @@ fun ThreadDetailScreen(
     onToggleTurn: (String) -> Unit,
     onToggleWorkGroup: (String) -> Unit,
     onInterrupt: () -> Unit,
+    resolveAttachmentUrl: suspend (String) -> String?,
     modifier: Modifier = Modifier,
     footer: @Composable (Modifier) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    // Hoisted out of the rows: a preview opened from a message must survive the
+    // row scrolling out of view, and `remember` inside a lazy item does not.
+    var previewUrl by remember { mutableStateOf<String?>(null) }
     val entries = feed.entries
     val newest = entries.lastOrNull()
     FollowFeedTail(
@@ -259,6 +274,8 @@ fun ThreadDetailScreen(
                             streamingMessageId = feed.streamingMessageId,
                             onToggleTurn = onToggleTurn,
                             onToggleWorkGroup = onToggleWorkGroup,
+                            resolveAttachmentUrl = resolveAttachmentUrl,
+                            onPreviewAttachment = { previewUrl = it },
                         )
                     }
                 }
@@ -278,6 +295,10 @@ fun ThreadDetailScreen(
             Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
         )
     }
+
+    previewUrl?.let { url ->
+        ImagePreviewDialog(model = url, onDismiss = { previewUrl = null })
+    }
 }
 
 private val FeedEntry.contentType: String
@@ -294,11 +315,15 @@ private fun FeedRow(
     streamingMessageId: String?,
     onToggleTurn: (String) -> Unit,
     onToggleWorkGroup: (String) -> Unit,
+    resolveAttachmentUrl: suspend (String) -> String?,
+    onPreviewAttachment: (String) -> Unit,
 ) {
     when (entry) {
         is FeedEntry.Message -> MessageRow(
             message = entry.message,
             isStreaming = entry.message.id == streamingMessageId,
+            resolveAttachmentUrl = resolveAttachmentUrl,
+            onPreviewAttachment = onPreviewAttachment,
         )
 
         is FeedEntry.Activity -> ActivityRow(entry.activity)
@@ -375,47 +400,82 @@ private fun FollowFeedTail(
 }
 
 @Composable
-private fun MessageRow(message: OrchestrationMessage, isStreaming: Boolean) {
+private fun MessageRow(
+    message: OrchestrationMessage,
+    isStreaming: Boolean,
+    resolveAttachmentUrl: suspend (String) -> String?,
+    onPreviewAttachment: (String) -> Unit,
+) {
     when (message.role) {
-        MessageRole.USER -> UserBubble(message)
-        else -> AssistantMessage(message, isStreaming)
+        MessageRole.USER -> UserBubble(message, resolveAttachmentUrl, onPreviewAttachment)
+        else -> AssistantMessage(message, isStreaming, resolveAttachmentUrl, onPreviewAttachment)
     }
 }
 
 @Composable
-private fun UserBubble(message: OrchestrationMessage) {
+private fun UserBubble(
+    message: OrchestrationMessage,
+    resolveAttachmentUrl: suspend (String) -> String?,
+    onPreviewAttachment: (String) -> Unit,
+) {
     val colors = KodeTheme.colors
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Box(
+        Column(
             modifier = Modifier
                 .widthIn(max = 320.dp)
                 .background(colors.userBubble, RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // User input is plain text, matching T3 Code — the composer does not
-            // author markdown, so skipping the parser here is free.
-            Text(
-                text = message.text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = colors.userBubbleText,
+            // An image-only message has no text at all; rendering the empty
+            // string would still claim a line box inside the bubble.
+            if (message.text.isNotEmpty()) {
+                // User input is plain text, matching T3 Code — the composer does
+                // not author markdown, so skipping the parser here is free.
+                Text(
+                    text = message.text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.userBubbleText,
+                )
+            }
+
+            MessageAttachments(
+                attachments = message.attachments,
+                resolveUrl = resolveAttachmentUrl,
+                onPreview = onPreviewAttachment,
             )
         }
     }
 }
 
 @Composable
-private fun AssistantMessage(message: OrchestrationMessage, isStreaming: Boolean) {
-    if (message.text.isEmpty()) return
+private fun AssistantMessage(
+    message: OrchestrationMessage,
+    isStreaming: Boolean,
+    resolveAttachmentUrl: suspend (String) -> String?,
+    onPreviewAttachment: (String) -> Unit,
+) {
+    if (message.text.isEmpty() && message.attachments.isEmpty()) return
 
-    if (isStreaming) {
-        KodeStreamingMarkdown(text = message.text, modifier = Modifier.fillMaxWidth())
-    } else {
-        // Keyed on id *and* length so a settled message reuses its cached parse
-        // across scrolling, while an edited one re-parses.
-        KodeMarkdown(
-            text = message.text,
-            cacheKey = message.id + ":" + message.text.length,
-            modifier = Modifier.fillMaxWidth(),
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (message.text.isNotEmpty()) {
+            if (isStreaming) {
+                KodeStreamingMarkdown(text = message.text, modifier = Modifier.fillMaxWidth())
+            } else {
+                // Keyed on id *and* length so a settled message reuses its cached
+                // parse across scrolling, while an edited one re-parses.
+                KodeMarkdown(
+                    text = message.text,
+                    cacheKey = message.id + ":" + message.text.length,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
+        MessageAttachments(
+            attachments = message.attachments,
+            resolveUrl = resolveAttachmentUrl,
+            onPreview = onPreviewAttachment,
         )
     }
 }
@@ -594,6 +654,9 @@ private fun Composer(
     config: ThreadConfig,
     onDraftChanged: (String) -> Unit,
     onSend: () -> Unit,
+    onPickImages: () -> Unit,
+    onRemoveAttachment: (String) -> Unit,
+    canAttach: Boolean,
     onModelSelected: (com.silverbullet.kode.feature.threads.domain.ModelOption) -> Unit,
     onModelOptionSelected: (String, JsonPrimitive) -> Unit,
     onRuntimeModeSelected: (String) -> Unit,
@@ -602,6 +665,7 @@ private fun Composer(
     voiceButton: (@Composable () -> Unit)? = null,
 ) {
     var sheetOpen by remember { mutableStateOf(false) }
+    var previewAttachment by remember { mutableStateOf<DraftAttachment?>(null) }
     val colors = KodeTheme.colors
 
     Column(modifier = modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -613,6 +677,16 @@ private fun Composer(
                 modifier = Modifier.padding(bottom = 6.dp),
             )
         }
+
+        // Above the input rather than inside it: the input is a rounded pill
+        // that grows with the text, and nesting a horizontally scrolling strip
+        // in it made the pill's height jump the moment an image was staged.
+        ComposerAttachmentStrip(
+            attachments = state.attachments,
+            onRemove = onRemoveAttachment,
+            onPreview = { previewAttachment = it },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        )
 
         Box(
             modifier = Modifier
@@ -649,8 +723,12 @@ private fun Composer(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Attachments are not implemented; the affordance is deliberately
-            // absent rather than present and dead.
+            // Hidden, not disabled, on hosts with no picker — the same rule the
+            // voice mic button follows for an unbound environment.
+            if (canAttach) {
+                AttachButton(enabled = state.canAttach, onClick = onPickImages)
+            }
+
             ConfigSummaryPill(
                 config = config,
                 onClick = { sheetOpen = true },
@@ -667,6 +745,13 @@ private fun Composer(
                 onSend = onSend,
             )
         }
+    }
+
+    previewAttachment?.let { attachment ->
+        ImagePreviewDialog(
+            model = attachment.previewUri,
+            onDismiss = { previewAttachment = null },
+        )
     }
 
     if (sheetOpen) {
@@ -716,6 +801,41 @@ private fun ConfigSummaryPill(
     }
 }
 
+/**
+ * The `+` affordance, sized to match the send button so the control row keeps
+ * one rhythm.
+ *
+ * Disabled rather than hidden once the per-message cap is reached: the button
+ * disappearing at the eighth image would read as a bug, while a dead control
+ * next to a full strip reads as a limit.
+ */
+@Composable
+private fun AttachButton(enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            // `clip` before `background`, so the ripple is bounded by the
+            // circle too: `clickable` draws its indication to the node's
+            // rectangular bounds unless something upstream clips it, which is
+            // what made a round button flash a square highlight.
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = KodeIcons.Plus,
+            contentDescription = "Attach images",
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                KodeTheme.colors.muted
+            },
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
 @Composable
 private fun SendButton(enabled: Boolean, sending: Boolean, onSend: () -> Unit) {
     val background = if (enabled) {
@@ -727,7 +847,9 @@ private fun SendButton(enabled: Boolean, sending: Boolean, onSend: () -> Unit) {
     Box(
         modifier = Modifier
             .size(40.dp)
-            .background(background, CircleShape)
+            // Clipped for the same reason as the attach button beside it.
+            .clip(CircleShape)
+            .background(background)
             .clickable(enabled = enabled && !sending, onClick = onSend),
         contentAlignment = Alignment.Center,
     ) {

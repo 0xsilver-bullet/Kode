@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.silverbullet.kode.platform.AndroidImagePicker
 import com.silverbullet.kode.platform.AndroidMicPermission
 import org.koin.android.ext.android.get
 
@@ -14,6 +15,7 @@ class MainActivity : ComponentActivity() {
         // Must precede super.onCreate's RESUMED transition: launchers register
         // against this activity, and the mic permission bridge needs a live one.
         get<AndroidMicPermission>().attach(this)
+        get<AndroidImagePicker>().attach(this)
         // Fully transparent scrims on both bars, so the app's own background
         // draws all the way to the edges. The default `enableEdgeToEdge()`
         // applies a translucent white scrim on the status bar, which is what

@@ -212,12 +212,28 @@ models, their tunables, and runtime — matching the mobile app rather than a pi
 Legacy models stay in the catalog and appear behind a "Show legacy models" toggle, but are never
 chosen as a default.
 
-Not done: attachments (T3 Code's `+` control), per-provider slash commands and skills, and the
-`showInteractionModeToggle` flag — we always show the mode row.
+Not done: per-provider slash commands and skills, and the `showInteractionModeToggle` flag — we
+always show the mode row.
 
-### Attachments
-`ChatAttachment` / `UploadChatAttachment` are modelled as empty on send. Needs `assets.createUrl`
-and image picking.
+### Attachments — current shape
+Images only, on both the thread composer and the new-thread form. The wire path is T3 Code's: the
+bytes ride inline on `thread.turn.start` as `UploadChatImageAttachment.dataUrl`, and the server
+answers with `ChatAttachment`s carrying ids. Sent images render from `assets.createUrl`, whose
+signed URL needs no bearer header; `ThreadsRepository` caches those URLs a minute inside the
+server's one-hour TTL, because the feed scrolls and re-asks for the same handful constantly.
+
+Picking is the Android system photo picker (`PickMultipleVisualMedia`), which needs no runtime
+permission. Oversized or unsupported images are re-encoded — long edge capped at 2560px, then JPEG
+at falling quality — and only rejected if they still will not fit; T3 Code rejects outright, which
+loses most modern phone photos.
+
+Voice prompts compose with attachments rather than duplicating them: images are staged in the
+composer, the voice dialog shows them as a read-only chip while reviewing, and accepting the prompt
+sends the staged images with it. The dialog has no picker of its own by design.
+
+Not done: clipboard paste and camera capture (T3 Code mobile has paste, not camera), attachments
+surviving process death (drafts are in-memory — there is no offline outbox yet), and pinch-zoom in
+the full-screen preview.
 
 ### Markdown rendering — current shape
 Two paths, both configured from `KodeMarkdownConfig` (one instance per theme, so the renderer's

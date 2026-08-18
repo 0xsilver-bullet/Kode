@@ -1,6 +1,8 @@
 package com.silverbullet.kode.feature.threads.di
 
 import com.silverbullet.kode.core.common.IdGenerator
+import com.silverbullet.kode.core.common.ImagePicker
+import com.silverbullet.kode.core.common.UnavailableImagePicker
 import com.silverbullet.kode.core.common.SystemTimeProvider
 import com.silverbullet.kode.core.common.TimeProvider
 import com.silverbullet.kode.core.common.UuidIdGenerator
@@ -18,6 +20,9 @@ import org.koin.dsl.module
 val threadsModule = module {
     single<IdGenerator> { UuidIdGenerator() }
     single<TimeProvider> { SystemTimeProvider() }
+
+    // Platforms with a gallery override this binding from their platform module.
+    single<ImagePicker> { UnavailableImagePicker() }
 
     single {
         ThreadsRepository(
@@ -40,6 +45,8 @@ val threadsModule = module {
             environmentId = environmentId,
             threadId = threadId,
             repository = get(),
+            imagePicker = get(),
+            idGenerator = get(),
             dispatchers = get(),
         )
     }

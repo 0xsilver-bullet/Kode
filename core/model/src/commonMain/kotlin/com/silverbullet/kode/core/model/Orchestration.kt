@@ -127,6 +127,12 @@ data class OrchestrationMessage(
      * projected text with [streaming] already settled.
      */
     val streaming: Boolean = false,
+    /**
+     * Images sent with this message. Bytes are never carried here — each entry
+     * is resolved to a signed URL through `assets.createUrl` when it is
+     * rendered.
+     */
+    val attachments: List<ChatAttachment> = emptyList(),
     val createdAt: String,
     val updatedAt: String,
 )

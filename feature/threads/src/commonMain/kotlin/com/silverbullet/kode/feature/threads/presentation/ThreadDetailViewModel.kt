@@ -4,6 +4,10 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.silverbullet.kode.core.common.DispatcherProvider
+import com.silverbullet.kode.core.common.IdGenerator
+import com.silverbullet.kode.core.common.ImagePickOutcome
+import com.silverbullet.kode.core.common.ImagePicker
+import com.silverbullet.kode.core.model.AttachmentLimits
 import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.InteractionMode
 import com.silverbullet.kode.core.model.MessageRole
@@ -11,8 +15,14 @@ import com.silverbullet.kode.core.model.ModelSelection
 import com.silverbullet.kode.core.model.ProviderOptionDescriptor
 import com.silverbullet.kode.core.model.RuntimeMode
 import com.silverbullet.kode.core.model.ThreadId
+import com.silverbullet.kode.feature.threads.domain.DraftAttachment
 import com.silverbullet.kode.feature.threads.domain.FeedEntry
 import com.silverbullet.kode.feature.threads.domain.ModelOption
+import com.silverbullet.kode.feature.threads.domain.appendPicked
+import com.silverbullet.kode.feature.threads.domain.attachmentCapReason
+import com.silverbullet.kode.feature.threads.domain.remainingAttachmentSlots
+import com.silverbullet.kode.feature.threads.domain.removeAttachment
+import com.silverbullet.kode.feature.threads.domain.toUploads
 import com.silverbullet.kode.feature.threads.domain.ProviderCatalog
 import com.silverbullet.kode.feature.threads.domain.applyOptionSelection
 import com.silverbullet.kode.feature.threads.domain.lockedDriver
@@ -43,6 +53,8 @@ class ThreadDetailViewModel(
     private val environmentId: EnvironmentId,
     private val threadId: ThreadId,
     private val repository: ThreadsRepository,
+    private val imagePicker: ImagePicker,
+    private val idGenerator: IdGenerator,
     dispatchers: DispatcherProvider,
 ) : ViewModel() {
 
@@ -70,6 +82,12 @@ class ThreadDetailViewModel(
 
     /** True while a stop request is in flight. */
     val interrupting: StateFlow<Boolean> = _interrupting.asStateFlow()
+
+    /**
+     * Whether this host can pick images at all. A constant, not a flow: the
+     * binding is chosen at DI time and cannot change while the app runs.
+     */
+    val canAttachImages: Boolean get() = imagePicker.isAvailable
 
     /**
      * The thread's project directory on the environment's machine — the worktree when the
@@ -109,14 +127,33 @@ class ThreadDetailViewModel(
      */
     suspend fun sendExternal(text: String): Result<Unit> {
         val current = feed.value
+        // Images staged in the composer ride along. This is what makes "attach
+        // first, then talk" work: the voice dialog never owns attachments, it
+        // just triggers the same send the composer would have, and the pending
+        // images are consumed by it.
+        val attachments = _composer.value.attachments
         return repository.sendMessage(
             environmentId = environmentId,
             threadId = threadId,
             text = text,
             runtimeMode = current.runtimeMode ?: RuntimeMode.APPROVAL_REQUIRED,
             interactionMode = current.interactionMode ?: InteractionMode.DEFAULT,
-        ).map { }
+            attachments = attachments.toUploads(),
+        ).onSuccess {
+            // Cleared only on success, and only the images this send carried:
+            // anything attached while the dispatch was in flight survives.
+            _composer.value = _composer.value.copy(
+                attachments = _composer.value.attachments.filterNot { staged ->
+                    attachments.any { it.id == staged.id }
+                },
+            )
+        }.map { }
     }
+
+    /** A signed URL for one sent attachment, or null when it cannot be resolved. */
+    suspend fun attachmentUrl(attachmentId: String): String? =
+        repository.attachmentUrl(environmentId, attachmentId)
+
 
     /**
      * Exposed separately from [feed] on purpose.
@@ -497,6 +534,45 @@ class ThreadDetailViewModel(
     }
 
     /**
+     * Opens the system picker and stages what comes back.
+     *
+     * The cap is checked before the picker opens as well as after: opening a
+     * picker that can only produce rejections is worse than saying so up front.
+     */
+    fun onPickImages() {
+        val staged = _composer.value.attachments
+        staged.attachmentCapReason()?.let { reason ->
+            _composer.value = _composer.value.copy(error = reason)
+            return
+        }
+
+        viewModelScope.launch {
+            val outcome = imagePicker.pick(
+                maxCount = staged.remainingAttachmentSlots(),
+                maxBytes = AttachmentLimits.MAX_IMAGE_BYTES,
+                supportedMimeTypes = AttachmentLimits.SUPPORTED_IMAGE_MIME_TYPES,
+            )
+            _composer.value = when (outcome) {
+                is ImagePickOutcome.Picked -> _composer.value.copy(
+                    attachments = _composer.value.attachments
+                        .appendPicked(outcome.images, idGenerator::newId),
+                    error = outcome.warning,
+                )
+
+                ImagePickOutcome.Cancelled -> _composer.value
+                is ImagePickOutcome.Failed -> _composer.value.copy(error = outcome.message)
+            }
+        }
+    }
+
+    fun onRemoveAttachment(attachmentId: String) {
+        _composer.value = _composer.value.copy(
+            attachments = _composer.value.attachments.removeAttachment(attachmentId),
+            error = null,
+        )
+    }
+
+    /**
      * Dispatches the draft as a new turn.
      *
      * The draft is cleared optimistically: the server echoes the user message
@@ -505,7 +581,10 @@ class ThreadDetailViewModel(
      */
     fun send() {
         val text = _composer.value.draft.trim()
-        if (text.isEmpty() || _composer.value.isSending) return
+        val attachments = _composer.value.attachments
+        // Images alone are a valid message — T3 Code sends a turn with empty
+        // text when only attachments are staged.
+        if ((text.isEmpty() && attachments.isEmpty()) || _composer.value.isSending) return
 
         // Inherit the thread's modes rather than forcing defaults, so we do not
         // strand the turn behind an approval this client cannot answer.
@@ -514,7 +593,12 @@ class ThreadDetailViewModel(
         val interactionMode = current.interactionMode ?: InteractionMode.DEFAULT
 
         viewModelScope.launch {
-            _composer.value = _composer.value.copy(isSending = true, draft = "", error = null)
+            _composer.value = _composer.value.copy(
+                isSending = true,
+                draft = "",
+                attachments = emptyList(),
+                error = null,
+            )
 
             val result = repository.sendMessage(
                 environmentId = environmentId,
@@ -522,14 +606,17 @@ class ThreadDetailViewModel(
                 text = text,
                 runtimeMode = runtimeMode,
                 interactionMode = interactionMode,
+                attachments = attachments.toUploads(),
             )
 
             _composer.value = result.fold(
                 onSuccess = { ComposerState() },
                 onFailure = { failure ->
-                    // Restore the draft so the text is not lost on failure.
+                    // Restore the draft *and* the images so a failed send loses
+                    // neither — re-picking eight photos is not a recovery path.
                     ComposerState(
                         draft = text,
+                        attachments = attachments,
                         error = failure.message ?: "Could not send the message.",
                     )
                 },
@@ -571,10 +658,16 @@ data class ThreadFeedUiState(
 @Immutable
 data class ComposerState(
     val draft: String = "",
+    /** Images staged for the next turn, in the order they were picked. */
+    val attachments: List<DraftAttachment> = emptyList(),
     val isSending: Boolean = false,
     val error: String? = null,
 ) {
-    val canSend: Boolean get() = draft.isNotBlank() && !isSending
+    /** Images with no text are a valid message; nothing at all is not. */
+    val canSend: Boolean
+        get() = (draft.isNotBlank() || attachments.isNotEmpty()) && !isSending
+
+    val canAttach: Boolean get() = attachments.size < AttachmentLimits.MAX_ATTACHMENTS
 }
 
 /** Per-request answering state, held across collapse and scrolling. */

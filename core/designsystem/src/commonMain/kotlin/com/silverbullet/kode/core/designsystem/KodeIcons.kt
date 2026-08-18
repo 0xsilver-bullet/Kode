@@ -139,6 +139,24 @@ object KodeIcons {
         }
     }
 
+    /** Dismiss: removing a staged attachment, closing the image preview. */
+    val Close: ImageVector by lazy {
+        strokeIcon("Close") {
+            moveTo(6f, 6f); lineTo(18f, 18f)
+            moveTo(18f, 6f); lineTo(6f, 18f)
+        }
+    }
+
+    /** Attachments: a framed photo with a sun and a horizon fold. */
+    val Image: ImageVector by lazy {
+        strokeIcon("Image") {
+            moveTo(4f, 5f); lineTo(20f, 5f); lineTo(20f, 19f); lineTo(4f, 19f); close()
+            moveTo(8.5f, 9.5f); lineTo(8.6f, 9.5f)
+            moveTo(4f, 16f); lineTo(9f, 11f); lineTo(14f, 16f)
+            moveTo(13f, 15f); lineTo(16f, 12f); lineTo(20f, 16f)
+        }
+    }
+
     val Zap: ImageVector by lazy {
         strokeIcon("Zap") {
             moveTo(13.5f, 3f); lineTo(5f, 13.5f); lineTo(11.5f, 13.5f)

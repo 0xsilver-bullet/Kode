@@ -9,15 +9,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,10 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.silverbullet.kode.core.designsystem.KodeIcons
 import com.silverbullet.kode.core.designsystem.KodeTheme
 import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ProjectId
 import com.silverbullet.kode.core.model.ThreadId
+import com.silverbullet.kode.feature.threads.domain.DraftAttachment
 import com.silverbullet.kode.feature.threads.domain.activeOptionLabels
 import com.silverbullet.kode.feature.threads.domain.runtimeModeLabel
 import com.silverbullet.kode.feature.threads.presentation.NewThreadUiState
@@ -67,6 +72,8 @@ fun NewThreadRoute(
         onEnvironmentSelected = viewModel::onEnvironmentSelected,
         onProjectSelected = viewModel::onProjectSelected,
         onMessageChanged = viewModel::onMessageChanged,
+        onPickImages = viewModel::onPickImages,
+        onRemoveAttachment = viewModel::onRemoveAttachment,
         onModelSelected = { option -> viewModel.onModelSelected(option) },
         onModelOptionSelected = viewModel::onModelOptionSelected,
         onRuntimeModeSelected = viewModel::onRuntimeModeSelected,
@@ -82,6 +89,8 @@ fun NewThreadScreen(
     onEnvironmentSelected: (EnvironmentId) -> Unit,
     onProjectSelected: (ProjectId) -> Unit,
     onMessageChanged: (String) -> Unit,
+    onPickImages: () -> Unit,
+    onRemoveAttachment: (String) -> Unit,
     onModelSelected: (com.silverbullet.kode.feature.threads.domain.ModelOption) -> Unit,
     onModelOptionSelected: (String, JsonPrimitive) -> Unit,
     onRuntimeModeSelected: (String) -> Unit,
@@ -90,6 +99,7 @@ fun NewThreadScreen(
     modifier: Modifier = Modifier,
 ) {
     var picker by remember { mutableStateOf<OpenPicker>(OpenPicker.None) }
+    var previewAttachment by remember { mutableStateOf<DraftAttachment?>(null) }
     val colors = KodeTheme.colors
     val selectedProject = uiState.projects.firstOrNull { it.id == uiState.projectId }
 
@@ -124,6 +134,29 @@ fun NewThreadScreen(
                 textStyle = MaterialTheme.typography.bodyLarge,
                 minLines = 3,
             )
+
+            // Attachments sit directly under the message they belong to, above
+            // the environment/project/agent settings, so the first message reads
+            // as one composed unit rather than as a form field plus an extra.
+            if (uiState.canAttach) {
+                ComposerAttachmentStrip(
+                    attachments = uiState.attachments,
+                    onRemove = onRemoveAttachment,
+                    onPreview = { previewAttachment = it },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(onClick = onPickImages, enabled = uiState.canAttachMore) {
+                    Icon(
+                        imageVector = KodeIcons.Image,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text = "Attach images",
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
 
             // "on <environment>": static until there is more than one, as in
             // T3's composer control.
@@ -177,6 +210,13 @@ fun NewThreadScreen(
             }
             Text("Start thread")
         }
+    }
+
+    previewAttachment?.let { attachment ->
+        ImagePreviewDialog(
+            model = attachment.previewUri,
+            onDismiss = { previewAttachment = null },
+        )
     }
 
     when (picker) {
