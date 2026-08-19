@@ -85,11 +85,13 @@ class PendingApprovalTest {
 
     @Test
     fun `a snapshot derives open approvals in sequence order`() {
+        // Listed out of order on purpose: the derivation trusts its caller to
+        // have sorted, so the test sorts the way the reducer does.
         val activities = listOf(
+            resolved("r1", sequence = 3),
             requested("r1", ApprovalRequestKind.COMMAND, sequence = 1),
             requested("r2", ApprovalRequestKind.FILE_CHANGE, sequence = 2),
-            resolved("r1", sequence = 3),
-        )
+        ).sortedInActivityOrder()
 
         assertEquals(setOf("r2"), derivePendingApprovals(activities).keys)
     }

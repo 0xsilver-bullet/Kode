@@ -146,15 +146,17 @@ fun Map<String, PendingUserInput>.applyUserInputActivity(
     }
 }
 
-/** Rebuilds open requests from scratch, for a snapshot. */
+/**
+ * Rebuilds open requests from scratch, for a snapshot.
+ *
+ * [activities] must already be in `sortedInActivityOrder` — see
+ * [derivePendingApprovals], which shares the caller's single sorted list.
+ */
 fun derivePendingUserInputs(
     activities: List<OrchestrationThreadActivity>,
 ): Map<String, PendingUserInput> {
     var open = emptyMap<String, PendingUserInput>()
-    // Ordering matters: a resolve must be able to close a request opened earlier
-    // in the same snapshot.
-    activities.sortedBy { it.sequence ?: Int.MAX_VALUE }
-        .forEach { open = open.applyUserInputActivity(it) }
+    activities.forEach { open = open.applyUserInputActivity(it) }
     return open
 }
 

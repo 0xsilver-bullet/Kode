@@ -133,6 +133,35 @@ class ThreadDetailStateTest {
     }
 
     @Test
+    fun `an activity resent under the same id updates that row in place`() {
+        // Subagent progress is emitted under a stable id
+        // (`task-progress:<thread>:<taskId>`) so each tick *replaces* the last
+        // known state. Skipping the repeat froze the row at its first value.
+        var state = ThreadDetailState().reduce(snapshotItem())
+        state = state.reduce(activityEvent(sequence = 2, id = "a1", summary = "Exploring"))
+        state = state.reduce(activityEvent(sequence = 3, id = "a2", summary = "Other work"))
+        state = state.reduce(activityEvent(sequence = 4, id = "a1", summary = "Writing the port"))
+
+        assertEquals(listOf("a1", "a2"), state.activities.map { it.id })
+        assertEquals("Writing the port", state.activities.first().summary)
+    }
+
+    @Test
+    fun `re-applying an unchanged activity leaves an equal state`() {
+        // Upserting instead of skipping only costs a feed rebuild when the row
+        // actually changed: `detail` is a StateFlow, so a structurally equal
+        // state is never re-emitted and the fold/collapse pipeline never re-runs.
+        var state = ThreadDetailState().reduce(snapshotItem())
+        state = state.reduce(activityEvent(sequence = 2, id = "a1", summary = "Ran a thing"))
+
+        val unchanged = state.reduce(
+            activityEvent(sequence = 3, id = "a1", summary = "Ran a thing"),
+        )
+
+        assertEquals(state.activities, unchanged.activities)
+    }
+
+    @Test
     fun `a model change is reflected in the thread`() {
         // Ignoring this event was why a configuration change looked like it had
         // silently failed: the command was accepted, but nothing updated the
@@ -353,6 +382,7 @@ class ThreadDetailStateTest {
         sequence: Int,
         id: String,
         createdAt: String = "2026-08-15T10:00:05.000Z",
+        summary: String = "Ran ./gradlew build",
     ) = ThreadStreamItem.Event(
         OrchestrationEvent.ActivityAppended(
             sequence = sequence,
@@ -361,7 +391,7 @@ class ThreadDetailStateTest {
                 id = id,
                 tone = "tool",
                 kind = "tool.bash",
-                summary = "Ran ./gradlew build",
+                summary = summary,
                 createdAt = createdAt,
             ),
         ),

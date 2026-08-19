@@ -75,15 +75,19 @@ data class ThreadDetailState(
 fun ThreadDetailState.reduce(item: ThreadStreamItem): ThreadDetailState = when (item) {
     is ThreadStreamItem.Snapshot -> {
         val thread = item.snapshot.thread
+        // Sorted once, for every consumer below: collapsing and the two
+        // lifecycle derivations all assume `activityOrder`, and a snapshot
+        // makes no promise about the order it lists activities in.
+        val ordered = thread.activities.sortedInActivityOrder()
         copy(
             thread = thread,
             messages = thread.messages,
-            activities = thread.activities.filter { it.isRenderable() }.map { it.toPresentation() },
+            activities = ordered.filter { it.isRenderable() }.map { it.toPresentation() },
             session = thread.session,
             // Derived from the raw activities: `toPresentation` drops the
             // payload, and the questions live there.
-            pendingUserInputs = derivePendingUserInputs(thread.activities),
-            pendingApprovals = derivePendingApprovals(thread.activities),
+            pendingUserInputs = derivePendingUserInputs(ordered),
+            pendingApprovals = derivePendingApprovals(ordered),
             checkpoints = thread.checkpoints.sortedBy { it.checkpointTurnCount },
             lastSequence = item.snapshot.snapshotSequence,
             status = SyncStatus.Synchronizing,
@@ -116,16 +120,27 @@ private fun ThreadDetailState.reduce(event: OrchestrationEvent): ThreadDetailSta
         // resolution may arrive as an activity we never display.
         val pending = pendingUserInputs.applyUserInputActivity(activity)
         val approvals = pendingApprovals.applyApprovalActivity(activity)
-        when {
-            // A replay across a resubscribe must not duplicate the row.
-            activities.any { it.id == activity.id } ->
-                copy(pendingUserInputs = pending, pendingApprovals = approvals)
-
-            !activity.isRenderable() ->
-                copy(pendingUserInputs = pending, pendingApprovals = approvals)
-
-            else -> copy(
-                activities = activities + activity.toPresentation(),
+        // Renderability first: `tool.progress` and `context-window.updated` are
+        // the densest events on the wire and none of them reach the list, so
+        // they should not pay for the id scan below.
+        if (!activity.isRenderable()) {
+            copy(pendingUserInputs = pending, pendingApprovals = approvals)
+        } else {
+            // Not every activity id is unique. Subagent rows are emitted under
+            // a *stable* id (`task-progress:<thread>:<taskId>`) precisely so a
+            // new tick replaces the last known state instead of stacking a row
+            // per tick — so an id we have already seen is an update in place,
+            // not a duplicate to discard. Replacing at the original index also
+            // keeps a replay across a resubscribe idempotent, which is what the
+            // old outright skip was there for.
+            val existing = activities.indexOfFirst { it.id == activity.id }
+            copy(
+                activities = if (existing < 0) {
+                    activities + activity.toPresentation()
+                } else {
+                    activities.toMutableList()
+                        .also { it[existing] = activity.toPresentation() }
+                },
                 pendingUserInputs = pending,
                 pendingApprovals = approvals,
             )

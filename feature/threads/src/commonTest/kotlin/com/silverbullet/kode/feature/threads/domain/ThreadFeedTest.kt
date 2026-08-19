@@ -92,6 +92,22 @@ class ThreadFeedTest {
     }
 
     @Test
+    fun `a completed tool call with no reported status still gets a row`() {
+        // Real `tool.completed` activities carry no `payload.status` at all.
+        // Classifying them neutral made the neutral filter delete the group,
+        // so a running turn whose only work was a finished tool call rendered
+        // nothing between the prompt and the working indicator.
+        val feed = buildFeed(
+            messages = listOf(user("m1", "turn1", "T10:00:00")),
+            activities = listOf(tool("a1", "turn1", "T10:00:10", summary = "Task", status = null)),
+            latestTurn = runningTurn(),
+            expansion = FeedExpansion(),
+        )
+
+        assertEquals(listOf("message:m1", "activity:a1"), feed.map { it.id })
+    }
+
+    @Test
     fun `a run of tool calls collapses to the newest plus a toggle`() {
         val feed = buildFeed(
             messages = listOf(user("m1", "turn1", "T10:00:00")),
@@ -109,6 +125,25 @@ class ThreadFeedTest {
         val toggle = assertIs<FeedEntry.WorkToggle>(feed.last())
         assertEquals(2, toggle.hiddenCount)
         assertTrue(toggle.onlyToolActivities)
+    }
+
+    @Test
+    fun `a long run of completed tool calls still costs two rows`() {
+        // The bound the feed's cost rests on. Reading a statusless completion as
+        // success means far more activities now survive the neutral filter, so
+        // this pins the thing that keeps that from reaching the lazy list: a
+        // collapsed group is one row plus a toggle no matter how long the run.
+        val feed = buildFeed(
+            messages = emptyList(),
+            activities = (1..200).map {
+                tool("a$it", "turn1", "T10:00:00", summary = "step $it", status = null)
+            },
+            latestTurn = runningTurn(),
+            expansion = FeedExpansion(),
+        )
+
+        assertEquals(listOf("activity:a200", "work-toggle:a1"), feed.map { it.id })
+        assertEquals(199, assertIs<FeedEntry.WorkToggle>(feed.last()).hiddenCount)
     }
 
     @Test
@@ -130,11 +165,13 @@ class ThreadFeedTest {
     @Test
     fun `tool rows with no signal are dropped entirely`() {
         // Neutral rows are the bulk of a long run and carry nothing actionable.
+        // "No signal" means *still in flight* — not merely "the payload named no
+        // status", which is the shape every completed call actually arrives in.
         val feed = buildFeed(
             messages = emptyList(),
             activities = listOf(
-                tool("a1", "turn1", "T10:00:01", status = null),
-                tool("a2", "turn1", "T10:00:02", status = null),
+                inFlightTool("a1", "turn1", "T10:00:01", summary = "one"),
+                inFlightTool("a2", "turn1", "T10:00:02", summary = "two"),
             ),
             latestTurn = runningTurn(),
             expansion = FeedExpansion(),
@@ -234,6 +271,21 @@ class ThreadFeedTest {
         summary: String = "Ran a command",
         status: String? = ToolLifecycleStatus.COMPLETED,
     ) = activity(id, turnId, createdAt, summary = summary, status = status).toPresentation()
+
+    /** A tool call still running: tool-like, neutral, and so never rendered. */
+    private fun inFlightTool(
+        id: String,
+        turnId: String,
+        createdAt: String,
+        summary: String,
+    ) = activity(
+        id,
+        turnId,
+        createdAt,
+        kind = "tool.updated",
+        summary = summary,
+        status = ToolLifecycleStatus.IN_PROGRESS,
+    ).toPresentation()
 
     private fun activity(
         id: String,

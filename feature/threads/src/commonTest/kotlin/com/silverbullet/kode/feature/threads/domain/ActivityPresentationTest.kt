@@ -118,6 +118,78 @@ class ActivityPresentationTest {
     }
 
     @Test
+    fun `a completed tool call with no reported status still reads as success`() {
+        // The server omits `status` when it projects `item.completed` into a
+        // `tool.completed` activity, so this — not the case above — is the shape
+        // every real finished tool call arrives in. Reading it as neutral made
+        // the feed delete the row, emptying the whole work log.
+        val presentation = activity(
+            kind = "tool.completed",
+            tone = ActivityTone.TOOL,
+            summary = "Task",
+            payload = ActivityPayload(
+                itemType = ToolItemType.DYNAMIC_TOOL_CALL,
+                detail = "<task id=\"ses_abc\">…</task>",
+            ),
+        ).toPresentation()
+
+        assertEquals(ActivityStatus.Success, presentation.status)
+        assertTrue(presentation.isToolLike)
+    }
+
+    @Test
+    fun `an in-flight tool update stays neutral`() {
+        val presentation = activity(
+            kind = "tool.updated",
+            tone = ActivityTone.TOOL,
+            payload = ActivityPayload(
+                itemType = ToolItemType.COMMAND_EXECUTION,
+                status = ToolLifecycleStatus.IN_PROGRESS,
+            ),
+        ).toPresentation()
+
+        assertEquals(ActivityStatus.Neutral, presentation.status)
+    }
+
+    @Test
+    fun `a subagent progress row never reads as success`() {
+        // "thinking" means the child is still working; a tick would be a lie.
+        val presentation = activity(
+            kind = "task.progress",
+            tone = ActivityTone.INFO,
+            payload = ActivityPayload(taskId = "task-1", summary = "Exploring"),
+        ).toPresentation()
+
+        assertEquals(ActivityStatus.Neutral, presentation.status)
+    }
+
+    @Test
+    fun `an unrecognised status on a completion does not block success`() {
+        val presentation = activity(
+            kind = "tool.completed",
+            tone = ActivityTone.TOOL,
+            payload = ActivityPayload(
+                itemType = ToolItemType.COMMAND_EXECUTION,
+                status = "whatever-the-provider-sent",
+            ),
+        ).toPresentation()
+
+        assertEquals(ActivityStatus.Success, presentation.status)
+    }
+
+    @Test
+    fun `activities sort by sequence then lifecycle rank`() {
+        val started = activity(kind = "tool.started").copy(id = "b", sequence = 2)
+        val completed = activity(kind = "tool.completed").copy(id = "a", sequence = 2)
+        val earlier = activity(kind = "tool.completed").copy(id = "c", sequence = 1)
+
+        assertEquals(
+            listOf("c", "b", "a"),
+            listOf(completed, started, earlier).sortedInActivityOrder().map { it.id },
+        )
+    }
+
+    @Test
     fun `failure is sniffed from output when no status is reported`() {
         // Providers do not report a status for every shell failure, so a
         // non-zero exit in the text must not render as a success tick.

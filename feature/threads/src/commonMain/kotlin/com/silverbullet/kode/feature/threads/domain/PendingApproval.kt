@@ -82,13 +82,20 @@ fun Map<String, PendingApproval>.applyApprovalActivity(
     }
 }
 
-/** Rebuilds open approvals from scratch, for a snapshot. */
+/**
+ * Rebuilds open approvals from scratch, for a snapshot.
+ *
+ * [activities] must already be in `sortedInActivityOrder`: a resolve has to be
+ * able to close a request opened earlier in the same snapshot. The caller sorts
+ * once and hands the same list to every derivation rather than each sorting its
+ * own copy, mirroring how T3 Code passes one `sortThreadActivities` result to
+ * both this and `derivePendingUserInputs`.
+ */
 fun derivePendingApprovals(
     activities: List<OrchestrationThreadActivity>,
 ): Map<String, PendingApproval> {
     var open = emptyMap<String, PendingApproval>()
-    activities.sortedBy { it.sequence ?: Int.MAX_VALUE }
-        .forEach { open = open.applyApprovalActivity(it) }
+    activities.forEach { open = open.applyApprovalActivity(it) }
     return open
 }
 

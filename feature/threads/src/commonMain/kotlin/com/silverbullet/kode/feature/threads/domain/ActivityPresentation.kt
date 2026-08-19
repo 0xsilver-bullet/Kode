@@ -155,8 +155,72 @@ private fun OrchestrationThreadActivity.resolveIcon(): ActivityIcon {
 /** Port of `workEntryStatus`. */
 private fun OrchestrationThreadActivity.resolveStatus(): ActivityStatus = when {
     indicatesFailure() -> ActivityStatus.Failure
-    payload?.status == ToolLifecycleStatus.COMPLETED -> ActivityStatus.Success
+    indicatesSuccess() -> ActivityStatus.Success
     else -> ActivityStatus.Neutral
+}
+
+/**
+ * Port of `workEntryIndicatesToolSuccess`.
+ *
+ * Only a still-running or stopped call withholds the success tick. That
+ * distinction matters more than it looks: a tool-like row left [Neutral] is
+ * deleted outright by the feed (see `toEntries` in [buildFeed]), so treating an
+ * unknown status as "not success" hides the call completely.
+ *
+ * A subagent's progress row ("thinking") never reads as success — it has not
+ * finished — so it stays neutral and is folded away like T3 Code folds it.
+ */
+private fun OrchestrationThreadActivity.indicatesSuccess(): Boolean {
+    if (effectiveTone(this) == TONE_THINKING) return false
+    val status = lifecycleStatus()
+    return status != ToolLifecycleStatus.IN_PROGRESS && status != ToolLifecycleStatus.STOPPED
+}
+
+/**
+ * Port of `extractWorkLogToolLifecycleStatus` *and* its `tool.completed`
+ * default.
+ *
+ * The server omits `status` when it projects `item.completed` into a
+ * `tool.completed` activity — only `tool.updated` forwards the provider's
+ * status (`ProviderRuntimeIngestion.ts`). So on a completion the absence of a
+ * status *is* the completion signal, and every finished tool call would
+ * otherwise be classified neutral and dropped from the work log.
+ *
+ * An unrecognised status is treated as absent, matching the TS extractor's
+ * whitelist.
+ */
+private fun OrchestrationThreadActivity.lifecycleStatus(): String? =
+    payload?.status?.takeIf { it in TOOL_LIFECYCLE_STATUSES }
+        ?: ToolLifecycleStatus.COMPLETED.takeIf { kind == "tool.completed" }
+
+private val TOOL_LIFECYCLE_STATUSES = setOf(
+    ToolLifecycleStatus.IN_PROGRESS,
+    ToolLifecycleStatus.COMPLETED,
+    ToolLifecycleStatus.FAILED,
+    ToolLifecycleStatus.DECLINED,
+    ToolLifecycleStatus.STOPPED,
+)
+
+/**
+ * Sorts activities the way `activityOrder` does: stream sequence first, then
+ * timestamp, then lifecycle rank as a tie-break for events stamped in the same
+ * millisecond, then id for total stability.
+ *
+ * Adjacency-based collapsing ([collapseWorkLog]) reads whatever order it is
+ * handed, so a snapshot that arrives out of order — or two activities sharing a
+ * `createdAt` — used to collapse a call into the wrong neighbour.
+ */
+fun List<OrchestrationThreadActivity>.sortedInActivityOrder(): List<OrchestrationThreadActivity> =
+    sortedWith(ACTIVITY_ORDER)
+
+private val ACTIVITY_ORDER: Comparator<OrchestrationThreadActivity> =
+    compareBy({ it.sequence ?: Int.MAX_VALUE }, { it.createdAt }, { it.lifecycleRank() }, { it.id })
+
+/** Port of `compareActivityLifecycleRank`. */
+private fun OrchestrationThreadActivity.lifecycleRank(): Int = when {
+    kind.endsWith(".started") -> 0
+    kind.endsWith(".completed") || kind.endsWith(".resolved") -> 2
+    else -> 1
 }
 
 private fun OrchestrationThreadActivity.indicatesFailure(): Boolean {

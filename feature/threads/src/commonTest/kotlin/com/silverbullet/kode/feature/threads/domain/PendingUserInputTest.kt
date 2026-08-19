@@ -62,11 +62,13 @@ class PendingUserInputTest {
 
     @Test
     fun `a snapshot derives open requests in sequence order`() {
+        // Listed out of order on purpose: the derivation trusts its caller to
+        // have sorted, so the test sorts the way the reducer does.
         val activities = listOf(
+            resolved("r1", sequence = 3),
             requested("r1", listOf(single("q1")), sequence = 1),
             requested("r2", listOf(single("q2")), sequence = 2),
-            resolved("r1", sequence = 3),
-        )
+        ).sortedInActivityOrder()
 
         assertEquals(setOf("r2"), derivePendingUserInputs(activities).keys)
     }
