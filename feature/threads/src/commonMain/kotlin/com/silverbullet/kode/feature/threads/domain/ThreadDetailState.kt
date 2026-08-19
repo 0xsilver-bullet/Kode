@@ -2,6 +2,7 @@ package com.silverbullet.kode.feature.threads.domain
 
 import androidx.compose.runtime.Immutable
 import com.silverbullet.kode.core.model.MessageRole
+import com.silverbullet.kode.core.model.OrchestrationCheckpointSummary
 import com.silverbullet.kode.core.model.OrchestrationEvent
 import com.silverbullet.kode.core.model.OrchestrationLatestTurn
 import com.silverbullet.kode.core.model.OrchestrationMessage
@@ -29,6 +30,12 @@ data class ThreadDetailState(
     val pendingUserInputs: Map<String, PendingUserInput> = emptyMap(),
     /** Open approval requests, keyed by request id. */
     val pendingApprovals: Map<String, PendingApproval> = emptyMap(),
+    /**
+     * Per-turn diff checkpoints, ascending by `checkpointTurnCount`. Seeded from
+     * the snapshot and kept live by `thread.turn-diff-completed` events; the
+     * review screen derives its turn sections from these.
+     */
+    val checkpoints: List<OrchestrationCheckpointSummary> = emptyList(),
     /**
      * The highest event sequence folded in so far, seeded from the snapshot's
      * `snapshotSequence`. The server attaches its live tap *before* loading the
@@ -77,6 +84,7 @@ fun ThreadDetailState.reduce(item: ThreadStreamItem): ThreadDetailState = when (
             // payload, and the questions live there.
             pendingUserInputs = derivePendingUserInputs(thread.activities),
             pendingApprovals = derivePendingApprovals(thread.activities),
+            checkpoints = thread.checkpoints.sortedBy { it.checkpointTurnCount },
             lastSequence = item.snapshot.snapshotSequence,
             status = SyncStatus.Synchronizing,
             error = null,
@@ -143,9 +151,14 @@ private fun ThreadDetailState.reduce(event: OrchestrationEvent): ThreadDetailSta
         thread = thread?.copy(interactionMode = event.interactionMode),
     )
 
-    // Diff results are not rendered yet; the event still means the turn's
-    // follow-up work settled.
-    is OrchestrationEvent.TurnDiffCompleted -> this
+    // Upsert by turn: a checkpoint can be re-emitted for the same turn (e.g.
+    // after a revert re-captures it), and must replace, not duplicate.
+    is OrchestrationEvent.TurnDiffCompleted -> event.checkpoint?.let { checkpoint ->
+        copy(
+            checkpoints = (checkpoints.filterNot { it.turnId == checkpoint.turnId } + checkpoint)
+                .sortedBy { it.checkpointTurnCount },
+        )
+    } ?: this
 
     is OrchestrationEvent.Unsupported -> this
 }

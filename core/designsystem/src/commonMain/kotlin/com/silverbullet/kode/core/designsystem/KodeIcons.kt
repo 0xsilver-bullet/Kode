@@ -245,6 +245,38 @@ object KodeIcons {
         }
     }
 
+    /**
+     * Git actions: Tabler's `git-merge` layout — two nodes on a trunk with a
+     * branch curving into a third, matching the glyph T3 Code maps its git
+     * control to on non-SF platforms.
+     */
+    val GitBranch: ImageVector by lazy {
+        strokeIcon("GitBranch") {
+            circle(7f, 6f, 2.5f)
+            circle(7f, 18f, 2.5f)
+            circle(17f, 12f, 2.5f)
+            moveTo(7f, 8.5f); lineTo(7f, 15.5f)
+            moveTo(7f, 8.5f)
+            quadTo(7f, 12f, 14.5f, 12f)
+        }
+    }
+
+    /** Pull: a straight-down arrow, mirroring [ArrowUp]. */
+    val ArrowDown: ImageVector by lazy {
+        strokeIcon("ArrowDown") {
+            moveTo(12f, 5f); lineTo(12f, 19f)
+            moveTo(6f, 13f); lineTo(12f, 19f); lineTo(18f, 13f)
+        }
+    }
+
+    /** Open externally: an arrow escaping to the top-right. */
+    val ArrowUpRight: ImageVector by lazy {
+        strokeIcon("ArrowUpRight") {
+            moveTo(7f, 17f); lineTo(17f, 7f)
+            moveTo(9f, 7f); lineTo(17f, 7f); lineTo(17f, 15f)
+        }
+    }
+
     /** Voice prompt: a capsule mic on its cradle. */
     val Mic: ImageVector by lazy {
         strokeIcon("Mic") {

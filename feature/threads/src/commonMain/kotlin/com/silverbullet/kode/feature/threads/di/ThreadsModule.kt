@@ -10,6 +10,8 @@ import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.session.di.ApplicationScopeQualifier
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
+import com.silverbullet.kode.feature.threads.domain.git.GitRepository
+import com.silverbullet.kode.feature.threads.presentation.ReviewViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadDetailViewModel
 import com.silverbullet.kode.feature.threads.presentation.NewThreadViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadListViewModel
@@ -35,6 +37,8 @@ val threadsModule = module {
         )
     }
 
+    single { GitRepository(fleet = get(), idGenerator = get()) }
+
     viewModelOf(::ThreadListViewModel)
     viewModelOf(::NewThreadViewModel)
 
@@ -45,8 +49,19 @@ val threadsModule = module {
             environmentId = environmentId,
             threadId = threadId,
             repository = get(),
+            gitRepository = get(),
             imagePicker = get(),
             idGenerator = get(),
+            dispatchers = get(),
+        )
+    }
+
+    viewModel { (environmentId: EnvironmentId, threadId: ThreadId) ->
+        ReviewViewModel(
+            environmentId = environmentId,
+            threadId = threadId,
+            repository = get(),
+            gitRepository = get(),
             dispatchers = get(),
         )
     }

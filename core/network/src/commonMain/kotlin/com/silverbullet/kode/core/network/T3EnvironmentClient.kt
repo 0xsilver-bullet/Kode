@@ -5,11 +5,26 @@ import com.silverbullet.kode.core.model.AssetCreateUrlResult
 import com.silverbullet.kode.core.model.AssetResource
 import com.silverbullet.kode.core.model.ClientOrchestrationCommand
 import com.silverbullet.kode.core.model.DispatchResult
+import com.silverbullet.kode.core.model.GetFullThreadDiffInput
+import com.silverbullet.kode.core.model.GetTurnDiffInput
+import com.silverbullet.kode.core.model.GitActionProgressEvent
+import com.silverbullet.kode.core.model.GitRunStackedActionInput
 import com.silverbullet.kode.core.model.OrchestrationStreamDecoder
+import com.silverbullet.kode.core.model.ReviewDiffPreviewInput
+import com.silverbullet.kode.core.model.ReviewDiffPreviewResult
 import com.silverbullet.kode.core.model.ServerConfig
 import com.silverbullet.kode.core.model.ShellStreamItem
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ThreadStreamItem
+import com.silverbullet.kode.core.model.ThreadTurnDiff
+import com.silverbullet.kode.core.model.VcsCreateRefInput
+import com.silverbullet.kode.core.model.VcsCreateRefResult
+import com.silverbullet.kode.core.model.VcsCwdInput
+import com.silverbullet.kode.core.model.VcsListRefsInput
+import com.silverbullet.kode.core.model.VcsListRefsResult
+import com.silverbullet.kode.core.model.VcsPullResult
+import com.silverbullet.kode.core.model.VcsStatusStreamEvent
+import com.silverbullet.kode.core.model.VcsStreamDecoder
 import com.silverbullet.kode.core.rpc.RpcConnection
 import com.silverbullet.kode.core.rpc.RpcProtocolException
 import kotlinx.coroutines.flow.Flow
@@ -33,6 +48,7 @@ class T3EnvironmentClient(
     private val json: Json = ContractJson,
 ) {
     private val decoder = OrchestrationStreamDecoder(json)
+    private val vcsDecoder = VcsStreamDecoder(json)
 
     /**
      * `server.getConfig` — the first call on every session. Its success is what
@@ -117,6 +133,104 @@ class T3EnvironmentClient(
         Methods.ASSETS_CREATE_URL,
     )
 
+    // ---------------------------------------------------------------------- git
+
+    /**
+     * `subscribeVcsStatus` — one directory's git status, as a first snapshot
+     * followed by `localUpdated`/`remoteUpdated` events. The server refreshes
+     * the local half after every mutating git RPC and after every agent turn,
+     * and polls the remote half itself — the client never polls.
+     */
+    fun subscribeVcsStatus(cwd: String): Flow<VcsStatusStreamEvent> =
+        connection.stream(
+            Methods.SUBSCRIBE_VCS_STATUS,
+            json.encodeToJsonElement(VcsCwdInput.serializer(), VcsCwdInput(cwd)),
+        ).map(vcsDecoder::decodeStatusEvent)
+
+    /**
+     * `vcs.refreshStatus` — asks the server to re-derive status now. The fresh
+     * value arrives over [subscribeVcsStatus] as a `snapshot`, so the returned
+     * payload is deliberately dropped.
+     */
+    suspend fun refreshVcsStatus(cwd: String) {
+        connection.request(
+            Methods.VCS_REFRESH_STATUS,
+            json.encodeToJsonElement(VcsCwdInput.serializer(), VcsCwdInput(cwd)),
+        )
+    }
+
+    /** `vcs.pull` — pulls the current branch's upstream. */
+    suspend fun pull(cwd: String): VcsPullResult = decode(
+        connection.request(
+            Methods.VCS_PULL,
+            json.encodeToJsonElement(VcsCwdInput.serializer(), VcsCwdInput(cwd)),
+        ),
+        Methods.VCS_PULL,
+    )
+
+    /** `vcs.listRefs` — branch list, local-only by default. */
+    suspend fun listRefs(input: VcsListRefsInput): VcsListRefsResult = decode(
+        connection.request(
+            Methods.VCS_LIST_REFS,
+            json.encodeToJsonElement(VcsListRefsInput.serializer(), input),
+        ),
+        Methods.VCS_LIST_REFS,
+    )
+
+    /** `vcs.createRef` — creates (and with `switchRef` checks out) a branch. */
+    suspend fun createRef(input: VcsCreateRefInput): VcsCreateRefResult = decode(
+        connection.request(
+            Methods.VCS_CREATE_REF,
+            json.encodeToJsonElement(VcsCreateRefInput.serializer(), input),
+        ),
+        Methods.VCS_CREATE_REF,
+    )
+
+    /**
+     * `git.runStackedAction` — commit/push/PR as one server-orchestrated
+     * pipeline, streamed as progress events. The stream ends after an
+     * `action_finished` or `action_failed` event; a stream that ends with
+     * neither means the transport died mid-action.
+     */
+    fun runStackedGitAction(input: GitRunStackedActionInput): Flow<GitActionProgressEvent> =
+        connection.stream(
+            Methods.GIT_RUN_STACKED_ACTION,
+            json.encodeToJsonElement(GitRunStackedActionInput.serializer(), input),
+        ).map(vcsDecoder::decodeActionProgressEvent)
+
+    // ------------------------------------------------------------------- review
+
+    /**
+     * `review.getDiffPreview` — the working-tree and branch-range diffs for a
+     * directory, as unified diff text (120 KB cap per source, marked
+     * `truncated`).
+     */
+    suspend fun getDiffPreview(cwd: String): ReviewDiffPreviewResult = decode(
+        connection.request(
+            Methods.REVIEW_GET_DIFF_PREVIEW,
+            json.encodeToJsonElement(ReviewDiffPreviewInput.serializer(), ReviewDiffPreviewInput(cwd)),
+        ),
+        Methods.REVIEW_GET_DIFF_PREVIEW,
+    )
+
+    /** `orchestration.getTurnDiff` — the diff one turn range produced. */
+    suspend fun getTurnDiff(input: GetTurnDiffInput): ThreadTurnDiff = decode(
+        connection.request(
+            Methods.GET_TURN_DIFF,
+            json.encodeToJsonElement(GetTurnDiffInput.serializer(), input),
+        ),
+        Methods.GET_TURN_DIFF,
+    )
+
+    /** `orchestration.getFullThreadDiff` — the thread's cumulative diff. */
+    suspend fun getFullThreadDiff(input: GetFullThreadDiffInput): ThreadTurnDiff = decode(
+        connection.request(
+            Methods.GET_FULL_THREAD_DIFF,
+            json.encodeToJsonElement(GetFullThreadDiffInput.serializer(), input),
+        ),
+        Methods.GET_FULL_THREAD_DIFF,
+    )
+
     // ------------------------------------------------------------------ helpers
 
     private inline fun <reified T> decode(element: JsonElement?, method: String): T {
@@ -135,6 +249,17 @@ class T3EnvironmentClient(
         const val DISPATCH_COMMAND = "orchestration.dispatchCommand"
 
         const val ASSETS_CREATE_URL = "assets.createUrl"
+
+        const val SUBSCRIBE_VCS_STATUS = "subscribeVcsStatus"
+        const val VCS_REFRESH_STATUS = "vcs.refreshStatus"
+        const val VCS_PULL = "vcs.pull"
+        const val VCS_LIST_REFS = "vcs.listRefs"
+        const val VCS_CREATE_REF = "vcs.createRef"
+        const val GIT_RUN_STACKED_ACTION = "git.runStackedAction"
+
+        const val REVIEW_GET_DIFF_PREVIEW = "review.getDiffPreview"
+        const val GET_TURN_DIFF = "orchestration.getTurnDiff"
+        const val GET_FULL_THREAD_DIFF = "orchestration.getFullThreadDiff"
     }
 
     companion object {

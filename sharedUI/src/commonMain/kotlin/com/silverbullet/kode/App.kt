@@ -46,6 +46,7 @@ import com.silverbullet.kode.feature.threads.ui.NewThreadRoute
 import com.silverbullet.kode.feature.threads.ui.ThreadDetailRoute
 import com.silverbullet.kode.feature.threads.ui.ThreadDetailTopBar
 import com.silverbullet.kode.feature.threads.ui.ThreadListRoute
+import com.silverbullet.kode.feature.threads.ui.review.ReviewRoute
 import com.silverbullet.kode.feature.voice.ui.VoicePromptEntry
 import com.silverbullet.kode.feature.voice.ui.VoiceSettingsRoute
 import com.silverbullet.kode.voice.contract.VoiceThreadMessage
@@ -58,6 +59,9 @@ private data object ThreadListDestination
 
 @Serializable
 private data class ThreadDetailDestination(val environmentId: String, val threadId: String)
+
+@Serializable
+private data class ThreadReviewDestination(val environmentId: String, val threadId: String)
 
 @Serializable
 private data object NewThreadDestination
@@ -218,6 +222,11 @@ private fun KodeNavHost() {
                         environmentId = EnvironmentId(route.environmentId),
                         threadId = ThreadId(route.threadId),
                         actions = { ConnectionBadge() },
+                        onOpenReview = {
+                            navController.navigate(
+                                ThreadReviewDestination(route.environmentId, route.threadId),
+                            )
+                        },
                     )
                 },
                 // Same reasoning, plus the composer has to react to the IME,
@@ -247,6 +256,18 @@ private fun KodeNavHost() {
                     },
                 )
             }
+        }
+
+        composable<ThreadReviewDestination> { entry ->
+            val route = entry.toRoute<ThreadReviewDestination>()
+            // The review screen owns its whole chrome (section switcher in the
+            // bar area), so no shared scaffold here.
+            ReviewRoute(
+                environmentId = EnvironmentId(route.environmentId),
+                threadId = ThreadId(route.threadId),
+                onBack = { navController.popBackStack() },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
 
         composable<SettingsDestination> {

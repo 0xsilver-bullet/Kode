@@ -133,6 +133,12 @@ data class ThreadCreateCommand(
  *
  * Note there is deliberately no `createdAt`: the contract does not carry one
  * for this command.
+ *
+ * [branch] and [worktreePath] are `Schema.optional(Schema.NullOr(…))` in the
+ * contract — omitting a key means "leave unchanged", so `String?` with
+ * `explicitNulls = false` is the right shape here (unlike the always-present
+ * `NullOr` fields on [ThreadCreateCommand]). Explicitly *clearing* a branch is
+ * not modelled because no client flow needs it.
  */
 @Serializable
 @SerialName("thread.meta.update")
@@ -141,6 +147,8 @@ data class ThreadMetaUpdateCommand(
     override val threadId: ThreadId,
     val modelSelection: ModelSelection? = null,
     val title: String? = null,
+    val branch: String? = null,
+    val worktreePath: String? = null,
 ) : ClientOrchestrationCommand {
     override val createdAt: String get() = ""
 }

@@ -17,6 +17,7 @@ junit = "4.13.2"
 koin = "4.2.2"
 kotlin = "2.4.10"
 ktor = "3.5.2"
+kotlinDiff = "1.1.0"
 markdown = "0.43.0"
 material3 = "1.11.0-alpha07"
 navigation = "2.9.2"
@@ -89,6 +90,10 @@ koin-compose-viewmodel = { module = "io.insert-koin:koin-compose-viewmodel", ver
 
 # DataStore
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences-core", version.ref = "datastore" }
+
+# Diff — word-level intra-line diffing for the review screen. The unified-diff
+# *parsing* is hand-written (this library deliberately excludes it).
+kotlin-multiplatform-diff = { module = "io.github.petertrr:kotlin-multiplatform-diff", version.ref = "kotlinDiff" }
 
 # Markdown
 markdown-renderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdown" }

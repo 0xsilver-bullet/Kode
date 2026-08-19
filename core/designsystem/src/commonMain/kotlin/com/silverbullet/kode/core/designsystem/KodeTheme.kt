@@ -39,6 +39,14 @@ data class KodeExtendedColors(
     val userBubble: Color,
     val userBubbleText: Color,
     val assistantSurface: Color,
+    /** Whole-line background of an added diff line. */
+    val diffAddedBackground: Color,
+    /** Whole-line background of a removed diff line. */
+    val diffRemovedBackground: Color,
+    /** Stronger span behind the word-level changed ranges of an added line. */
+    val diffAddedHighlight: Color,
+    /** Stronger span behind the word-level changed ranges of a removed line. */
+    val diffRemovedHighlight: Color,
 )
 
 val LocalKodeColors = staticCompositionLocalOf<KodeExtendedColors> {
@@ -136,6 +144,10 @@ private val WaveExtendedColors = KodeExtendedColors(
     userBubble = Kanagawa.Wave.waveBlue1,
     userBubbleText = Kanagawa.Wave.fujiWhite,
     assistantSurface = Color.Transparent,
+    diffAddedBackground = Kanagawa.Wave.winterGreen,
+    diffRemovedBackground = Kanagawa.Wave.winterRed,
+    diffAddedHighlight = Kanagawa.Wave.springGreen.copy(alpha = 0.32f),
+    diffRemovedHighlight = Kanagawa.Wave.waveRed.copy(alpha = 0.32f),
 )
 
 private val LotusExtendedColors = KodeExtendedColors(
@@ -157,6 +169,10 @@ private val LotusExtendedColors = KodeExtendedColors(
     userBubble = Kanagawa.Lotus.lotusBlue1,
     userBubbleText = Kanagawa.Lotus.lotusInk1,
     assistantSurface = Color.Transparent,
+    diffAddedBackground = Kanagawa.Lotus.lotusGreen3.copy(alpha = 0.45f),
+    diffRemovedBackground = Kanagawa.Lotus.lotusRed4.copy(alpha = 0.40f),
+    diffAddedHighlight = Kanagawa.Lotus.lotusGreen3,
+    diffRemovedHighlight = Kanagawa.Lotus.lotusRed4,
 )
 
 /**

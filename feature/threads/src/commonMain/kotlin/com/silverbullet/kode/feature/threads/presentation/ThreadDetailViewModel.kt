@@ -43,6 +43,7 @@ import com.silverbullet.kode.core.designsystem.MarkdownParseCache
 import com.silverbullet.kode.core.designsystem.parseBlockGroups
 import com.silverbullet.kode.feature.threads.domain.buildThreadHeader
 import com.silverbullet.kode.feature.threads.domain.buildFeed
+import com.silverbullet.kode.feature.threads.domain.git.GitRepository
 import com.silverbullet.kode.feature.threads.domain.splitSettledAssistantMessages
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -58,6 +60,7 @@ class ThreadDetailViewModel(
     private val environmentId: EnvironmentId,
     private val threadId: ThreadId,
     private val repository: ThreadsRepository,
+    private val gitRepository: GitRepository,
     private val imagePicker: ImagePicker,
     private val idGenerator: IdGenerator,
     dispatchers: DispatcherProvider,
@@ -148,6 +151,35 @@ class ThreadDetailViewModel(
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
             initialValue = null,
         )
+
+    /**
+     * The thread's branch and worktree, for the git sheet's header and
+     * worktree card — shown before the first VCS status snapshot lands.
+     */
+    val threadBranch: StateFlow<String?> = detail
+        .map { it.thread?.branch }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
+
+    val threadWorktreePath: StateFlow<String?> = detail
+        .map { it.thread?.worktreePath }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
+
+    /**
+     * The git slice of this screen: folded `subscribeVcsStatus` state plus the
+     * stacked commit/push/PR runner. One instance shared by the top bar's
+     * sheet, the commit pane and the progress banner. Declared after
+     * [projectDir], which it derives its working directory from.
+     */
+    val git: ThreadGitDelegate = ThreadGitDelegate(
+        scope = viewModelScope,
+        environmentId = environmentId,
+        threadId = threadId,
+        gitRepository = gitRepository,
+        idGenerator = idGenerator,
+        projectDir = projectDir,
+        worktreePath = { detail.value.thread?.worktreePath },
+        dispatchers = dispatchers,
+    )
 
     /**
      * A snapshot of the newest conversation turns as (role, text) pairs, oldest first —

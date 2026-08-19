@@ -72,6 +72,7 @@ import com.silverbullet.kode.feature.threads.domain.runtimeModeLabel
 import com.silverbullet.kode.feature.threads.domain.selectableChoices
 import com.silverbullet.kode.feature.threads.domain.DraftAttachment
 import com.silverbullet.kode.feature.threads.presentation.ComposerState
+import com.silverbullet.kode.feature.threads.ui.git.GitActionBanner
 import com.silverbullet.kode.feature.threads.presentation.ThreadDetailViewModel
 import com.silverbullet.kode.feature.threads.presentation.ThreadFeedUiState
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -111,87 +112,103 @@ fun ThreadDetailRoute(
     val feed by viewModel.feed.collectAsStateWithLifecycle()
     val interrupting by viewModel.interrupting.collectAsStateWithLifecycle()
 
-    ThreadDetailScreen(
-        feed = feed,
-        interrupting = interrupting,
-        onToggleTurn = viewModel::toggleTurn,
-        onToggleWorkGroup = viewModel::toggleWorkGroup,
-        onInterrupt = viewModel::interruptTurn,
-        resolveAttachmentUrl = viewModel::attachmentUrl,
-        modifier = modifier,
-        footer = { footerModifier ->
-            // Both collect their own state, so a keystroke never reaches the
-            // feed's recomposition scope and a streamed token never recomposes
-            // whatever the user is typing into.
-            val approval by viewModel.approval.collectAsStateWithLifecycle()
-            val userInput by viewModel.userInput.collectAsStateWithLifecycle()
+    Box(modifier = modifier) {
+        ThreadDetailScreen(
+            feed = feed,
+            interrupting = interrupting,
+            onToggleTurn = viewModel::toggleTurn,
+            onToggleWorkGroup = viewModel::toggleWorkGroup,
+            onInterrupt = viewModel::interruptTurn,
+            resolveAttachmentUrl = viewModel::attachmentUrl,
+            modifier = Modifier.fillMaxSize(),
+            footer = { footerModifier ->
+                // Both collect their own state, so a keystroke never reaches the
+                // feed's recomposition scope and a streamed token never recomposes
+                // whatever the user is typing into.
+                val approval by viewModel.approval.collectAsStateWithLifecycle()
+                val userInput by viewModel.userInput.collectAsStateWithLifecycle()
 
-            if (approval.isActive) {
-                // Approvals outrank questions: one gates an action the agent is
-                // part-way through, and deciding it is a single tap.
-                PendingApprovalCard(
-                    state = approval,
-                    onToggleCollapsed = viewModel::toggleApprovalCollapsed,
-                    onDecide = viewModel::decideApproval,
-                    modifier = footerModifier,
-                )
-            } else if (userInput.isActive) {
-                // The question card takes the composer's place: there is nothing
-                // useful to send until the agent has its answer.
-                PendingUserInputCard(
-                    state = userInput,
-                    onToggleCollapsed = viewModel::toggleUserInputCollapsed,
-                    onOptionToggled = viewModel::onOptionToggled,
-                    onCustomAnswerChanged = viewModel::onCustomAnswerChanged,
-                    onSubmit = viewModel::submitUserInput,
-                    modifier = footerModifier,
-                )
-            } else {
-                val composerState by viewModel.composer.collectAsStateWithLifecycle()
-                val voiceButton: (@Composable () -> Unit)? = voiceComposerSlot?.let { slot ->
-                    {
-                        val projectDir by viewModel.projectDir.collectAsStateWithLifecycle()
-                        slot(
-                            VoiceComposerContext(
-                                environmentId = environmentId,
-                                threadId = threadId,
-                                projectDir = projectDir,
-                                recentMessages = viewModel::recentMessagesSnapshot,
-                                // Read from composer state rather than the
-                                // snapshot lambda, so staging an image while the
-                                // mic button is on screen updates its chip.
-                                attachmentPreviews = composerState.attachments
-                                    .map { it.previewUri },
-                                sendPrompt = viewModel::sendExternal,
-                            ),
-                        )
+                if (approval.isActive) {
+                    // Approvals outrank questions: one gates an action the agent is
+                    // part-way through, and deciding it is a single tap.
+                    PendingApprovalCard(
+                        state = approval,
+                        onToggleCollapsed = viewModel::toggleApprovalCollapsed,
+                        onDecide = viewModel::decideApproval,
+                        modifier = footerModifier,
+                    )
+                } else if (userInput.isActive) {
+                    // The question card takes the composer's place: there is nothing
+                    // useful to send until the agent has its answer.
+                    PendingUserInputCard(
+                        state = userInput,
+                        onToggleCollapsed = viewModel::toggleUserInputCollapsed,
+                        onOptionToggled = viewModel::onOptionToggled,
+                        onCustomAnswerChanged = viewModel::onCustomAnswerChanged,
+                        onSubmit = viewModel::submitUserInput,
+                        modifier = footerModifier,
+                    )
+                } else {
+                    val composerState by viewModel.composer.collectAsStateWithLifecycle()
+                    val voiceButton: (@Composable () -> Unit)? = voiceComposerSlot?.let { slot ->
+                        {
+                            val projectDir by viewModel.projectDir.collectAsStateWithLifecycle()
+                            slot(
+                                VoiceComposerContext(
+                                    environmentId = environmentId,
+                                    threadId = threadId,
+                                    projectDir = projectDir,
+                                    recentMessages = viewModel::recentMessagesSnapshot,
+                                    // Read from composer state rather than the
+                                    // snapshot lambda, so staging an image while the
+                                    // mic button is on screen updates its chip.
+                                    attachmentPreviews = composerState.attachments
+                                        .map { it.previewUri },
+                                    sendPrompt = viewModel::sendExternal,
+                                ),
+                            )
+                        }
                     }
+                    Composer(
+                        state = composerState,
+                        config = ThreadConfig(
+                            catalog = feed.catalog,
+                            selectedModel = feed.selectedModel,
+                            lockedDriver = feed.lockedDriver,
+                            optionDescriptors = feed.optionDescriptors,
+                            runtimeMode = feed.runtimeMode,
+                            interactionMode = feed.interactionMode,
+                        ),
+                        onDraftChanged = viewModel::onDraftChanged,
+                        onSend = viewModel::send,
+                        onPickImages = viewModel::onPickImages,
+                        onRemoveAttachment = viewModel::onRemoveAttachment,
+                        canAttach = viewModel.canAttachImages,
+                        onModelSelected = viewModel::selectModel,
+                        onModelOptionSelected = viewModel::selectModelOption,
+                        onRuntimeModeSelected = viewModel::selectRuntimeMode,
+                        onInteractionModeSelected = viewModel::selectInteractionMode,
+                        modifier = footerModifier,
+                        voiceButton = voiceButton,
+                    )
                 }
-                Composer(
-                    state = composerState,
-                    config = ThreadConfig(
-                        catalog = feed.catalog,
-                        selectedModel = feed.selectedModel,
-                        lockedDriver = feed.lockedDriver,
-                        optionDescriptors = feed.optionDescriptors,
-                        runtimeMode = feed.runtimeMode,
-                        interactionMode = feed.interactionMode,
-                    ),
-                    onDraftChanged = viewModel::onDraftChanged,
-                    onSend = viewModel::send,
-                    onPickImages = viewModel::onPickImages,
-                    onRemoveAttachment = viewModel::onRemoveAttachment,
-                    canAttach = viewModel.canAttachImages,
-                    onModelSelected = viewModel::selectModel,
-                    onModelOptionSelected = viewModel::selectModelOption,
-                    onRuntimeModeSelected = viewModel::selectRuntimeMode,
-                    onInteractionModeSelected = viewModel::selectInteractionMode,
-                    modifier = footerModifier,
-                    voiceButton = voiceButton,
-                )
-            }
-        },
-    )
+            },
+        )
+
+        // Overlaid, not stacked: while a commit/push/PR pipeline runs, the
+        // banner floats over the feed and then becomes the result toast.
+        // Isolated in its own composable so progress recomposes only it.
+        GitActionBannerHost(
+            viewModel = viewModel,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+    }
+}
+
+@Composable
+private fun GitActionBannerHost(viewModel: ThreadDetailViewModel, modifier: Modifier = Modifier) {
+    val action by viewModel.git.action.collectAsStateWithLifecycle()
+    GitActionBanner(state = action, onDismiss = viewModel.git::dismissNotice, modifier = modifier)
 }
 
 @Composable

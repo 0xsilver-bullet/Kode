@@ -74,9 +74,16 @@ sealed interface OrchestrationEvent {
         val session: OrchestrationSession,
     ) : OrchestrationEvent
 
+    /**
+     * A turn's diff checkpoint is ready. Carries the checkpoint summary the
+     * review screen lists — the diff itself is fetched on demand via
+     * `orchestration.getTurnDiff`. Also the signal that the working tree
+     * changed, so an open git surface should refresh.
+     */
     data class TurnDiffCompleted(
         override val sequence: Int,
         val threadId: ThreadId,
+        val checkpoint: OrchestrationCheckpointSummary?,
     ) : OrchestrationEvent
 
     /**
@@ -148,8 +155,36 @@ private data class ThreadSessionSetPayload(
     val session: OrchestrationSession,
 )
 
+/**
+ * `ThreadTurnDiffCompletedPayload`. Every field beyond `threadId` defaults, so
+ * a payload from a server predating checkpoint summaries still decodes — the
+ * event then only signals "the worktree changed" without adding a checkpoint.
+ */
 @Serializable
-private data class ThreadIdPayload(val threadId: ThreadId)
+private data class ThreadTurnDiffCompletedPayload(
+    val threadId: ThreadId,
+    val turnId: String? = null,
+    val checkpointTurnCount: Int = 0,
+    val checkpointRef: String? = null,
+    val status: String = CheckpointStatus.READY,
+    val files: List<OrchestrationCheckpointFile> = emptyList(),
+    val assistantMessageId: String? = null,
+    val completedAt: String? = null,
+) {
+    fun toCheckpoint(): OrchestrationCheckpointSummary? {
+        val turn = turnId ?: return null
+        val ref = checkpointRef ?: return null
+        return OrchestrationCheckpointSummary(
+            turnId = turn,
+            checkpointTurnCount = checkpointTurnCount,
+            checkpointRef = ref,
+            status = status,
+            files = files,
+            assistantMessageId = assistantMessageId,
+            completedAt = completedAt ?: "",
+        )
+    }
+}
 
 @Serializable
 private data class ThreadMetaUpdatedPayload(
@@ -273,8 +308,12 @@ class OrchestrationStreamDecoder(private val json: Json) {
             }
 
             "thread.turn-diff-completed" -> {
-                val decoded: ThreadIdPayload = decodePayload(payload, type)
-                OrchestrationEvent.TurnDiffCompleted(sequence, decoded.threadId)
+                val decoded: ThreadTurnDiffCompletedPayload = decodePayload(payload, type)
+                OrchestrationEvent.TurnDiffCompleted(
+                    sequence = sequence,
+                    threadId = decoded.threadId,
+                    checkpoint = decoded.toCheckpoint(),
+                )
             }
 
             else -> OrchestrationEvent.Unsupported(sequence, type)

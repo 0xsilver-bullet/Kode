@@ -366,6 +366,39 @@ data class OrchestrationProjectShell(
     val updatedAt: String,
 )
 
+/** One file a turn's checkpoint touched. `kind` is an open string (add/modify/…). */
+@Serializable
+data class OrchestrationCheckpointFile(
+    val path: String,
+    val kind: String = "",
+    val additions: Int = 0,
+    val deletions: Int = 0,
+)
+
+/** `OrchestrationCheckpointStatus`. */
+object CheckpointStatus {
+    const val READY = "ready"
+    const val MISSING = "missing"
+    const val ERROR = "error"
+}
+
+/**
+ * One turn's diff checkpoint, from the snapshot's `checkpoints` array or a
+ * `thread.turn-diff-completed` event. `checkpointTurnCount` is the turn ordinal
+ * the checkpoint captures; the diff itself is fetched on demand through
+ * `orchestration.getTurnDiff`.
+ */
+@Serializable
+data class OrchestrationCheckpointSummary(
+    val turnId: String,
+    val checkpointTurnCount: Int,
+    val checkpointRef: String,
+    val status: String = CheckpointStatus.READY,
+    val files: List<OrchestrationCheckpointFile> = emptyList(),
+    val assistantMessageId: String? = null,
+    val completedAt: String,
+)
+
 /** The full thread, from a `subscribeThread` snapshot. */
 @Serializable
 data class OrchestrationThread(
@@ -384,6 +417,7 @@ data class OrchestrationThread(
     val deletedAt: String? = null,
     val messages: List<OrchestrationMessage> = emptyList(),
     val activities: List<OrchestrationThreadActivity> = emptyList(),
+    val checkpoints: List<OrchestrationCheckpointSummary> = emptyList(),
     val session: OrchestrationSession? = null,
 )
 
