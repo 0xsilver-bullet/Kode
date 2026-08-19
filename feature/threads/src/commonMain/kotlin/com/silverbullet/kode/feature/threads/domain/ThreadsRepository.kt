@@ -6,6 +6,7 @@ import com.silverbullet.kode.core.model.AssetResource
 import com.silverbullet.kode.core.model.ClientOrchestrationCommand
 import com.silverbullet.kode.core.model.DispatchResult
 import com.silverbullet.kode.core.model.EnvironmentId
+import com.silverbullet.kode.core.model.ExecutionEnvironmentCapabilities
 import com.silverbullet.kode.core.model.MessageRole
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ModelSelection
@@ -14,6 +15,7 @@ import com.silverbullet.kode.core.model.ThreadApprovalRespondCommand
 import com.silverbullet.kode.core.model.ThreadInteractionModeSetCommand
 import com.silverbullet.kode.core.model.ThreadMetaUpdateCommand
 import com.silverbullet.kode.core.model.ThreadRuntimeModeSetCommand
+import com.silverbullet.kode.core.model.ThreadSettleCommand
 import com.silverbullet.kode.core.model.ThreadTurnInterruptCommand
 import com.silverbullet.kode.core.model.ThreadTurnStartBootstrap
 import com.silverbullet.kode.core.model.ThreadTurnStartBootstrapCreateThread
@@ -50,6 +52,12 @@ data class EnvironmentShell(
     val label: String,
     val connection: ConnectionState,
     val shell: ShellState,
+    /**
+     * What this server admits to understanding. Absent flags mean unsupported,
+     * so a feature gated on one stays hidden under version skew rather than
+     * dispatching a command the server would reject.
+     */
+    val capabilities: ExecutionEnvironmentCapabilities = ExecutionEnvironmentCapabilities(),
 ) {
     val isConnected: Boolean get() = connection is ConnectionState.Connected
 }
@@ -110,12 +118,17 @@ class ThreadsRepository(
                     }
             }
         }
-        return combine(state, shellStates) { connection, shell ->
+        return combine(state, shellStates, serverConfig) { connection, shell, config ->
             EnvironmentShell(
                 environmentId = record.environmentId,
                 label = record.label,
                 connection = connection,
                 shell = shell,
+                // Null until the handshake lands, which reads as "no optional
+                // capabilities" — the same conservative default as an old
+                // server, and it flips to the real set on the next emission.
+                capabilities = config?.environment?.capabilities
+                    ?: ExecutionEnvironmentCapabilities(),
             )
         }
     }
@@ -287,6 +300,26 @@ class ThreadsRepository(
                 threadId = threadId,
                 turnId = turnId,
                 createdAt = timeProvider.nowIso(),
+            ) as ClientOrchestrationCommand,
+        )
+    }
+
+    /**
+     * Files a thread away as finished business.
+     *
+     * Nothing is written locally: the server projects `settledOverride` and
+     * echoes the thread over the shell subscription, which is what moves the
+     * row into the settled shelf. Failing loudly is the point — the decider
+     * rejects a settle whose preconditions changed under us.
+     */
+    suspend fun settleThread(
+        environmentId: EnvironmentId,
+        threadId: ThreadId,
+    ): Result<DispatchResult> = runCatchingCancellable {
+        connectedClient(environmentId).dispatchCommand(
+            ThreadSettleCommand(
+                commandId = idGenerator.newId(),
+                threadId = threadId,
             ) as ClientOrchestrationCommand,
         )
     }

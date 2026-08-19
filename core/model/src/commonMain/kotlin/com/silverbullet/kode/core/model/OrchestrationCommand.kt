@@ -218,6 +218,32 @@ object ApprovalDecision {
 }
 
 /**
+ * Files a thread away as finished business.
+ *
+ * `ThreadSettleCommand` in `packages/contracts/src/orchestration.ts` carries
+ * nothing but the ids — no timestamp, because the server stamps `settledAt`
+ * itself so two devices cannot disagree about when a thread was put down.
+ *
+ * The decider rejects a settle on a thread with a live session, an open
+ * approval / user-input request, or a just-queued turn, so callers should
+ * pre-check the same conditions rather than surface the error
+ * (see `isSettleable`). Settling an already-settled thread is a silent no-op.
+ *
+ * Only send this to an environment advertising
+ * [ExecutionEnvironmentCapabilities.threadSettlement].
+ */
+@Serializable
+@SerialName("thread.settle")
+data class ThreadSettleCommand(
+    override val commandId: String,
+    override val threadId: ThreadId,
+) : ClientOrchestrationCommand {
+    // Not on the wire schema, and a custom getter has no backing field, so
+    // nothing is serialized for it.
+    override val createdAt: String get() = ""
+}
+
+/**
  * The user message a turn starts from.
  *
  * [attachments] takes the *upload* shape, not the one messages carry: the bytes

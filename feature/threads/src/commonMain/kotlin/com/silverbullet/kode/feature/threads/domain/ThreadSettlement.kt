@@ -61,6 +61,27 @@ fun OrchestrationThreadShell.isEffectivelySettled(
     return last < nowInstant - autoSettleAfterDays.toLong().toDuration(DurationUnit.DAYS)
 }
 
+/**
+ * Whether a settle command would be accepted.
+ *
+ * Ported from `canSettle` in `packages/client-runtime/src/state/threadSettled.ts`,
+ * and deliberately the same three blockers the server's decider checks before
+ * it will emit `thread.settled`. Checking them here is what keeps the swipe
+ * action from offering a button that can only fail: a thread that is working,
+ * waiting on the user, or has a turn queued is not finished business.
+ *
+ * Note this is *not* `!isEffectivelySettled`: a thread that is merely quiet
+ * enough to auto-settle is still settleable, and settling it pins the state so
+ * later activity cannot resurrect it silently.
+ */
+fun OrchestrationThreadShell.isSettleable(now: String): Boolean {
+    if (hasPendingApprovals || hasPendingUserInput) return false
+    if (session?.status == SessionStatus.STARTING || session?.status == SessionStatus.RUNNING) {
+        return false
+    }
+    return !hasQueuedTurnStart(now)
+}
+
 /** `settledOverride` values. */
 object SettledOverride {
     const val SETTLED = "settled"

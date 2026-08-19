@@ -152,15 +152,29 @@ stop.
 `ProviderApprovalDecision.cancel` still is not surfaced; it cancels a turn from an approval prompt
 and would belong here rather than on the approval card.
 
-### Settled threads — separated, but not actionable
+### Settled threads — settle by swipe, no unsettle
 The thread list partitions on `effectiveSettled` (ported to `ThreadSettlement.kt`) and puts settled
 threads behind a collapsed **Settled** shelf with a count. Auto-settle is 3 days, matching
 `threadListV2.ts`.
 
+Swiping a row left reveals a **Settle** button, as T3 Code mobile's `thread-swipe-actions.tsx` does:
+`SwipeReveal` in `:core:designsystem` (Foundation `anchoredDraggable`, the ported spring and 0.42
+open threshold, one open row at a time, closing on scroll) and `thread.settle` through
+`ThreadsRepository.settleThread`. The action is offered only where it would be accepted —
+`isSettleable` mirrors the decider's blockers, and the row is rendered without the swipe container
+when the environment does not advertise `threadSettlement`.
+
 Not done:
-- **No settle/unsettle action.** `thread.settle` / `thread.unsettle` exist and are gated on the
-  `threadSettlement` capability; we only *read* `settledOverride`, so a thread can be pinned from
-  the desktop but not from the phone.
+- **No unsettle.** `thread.unsettle` (`reason: "user"`) is not modelled, so a settled thread cannot
+  be brought back from the phone. T3 Code puts it on the settled shelf's slim rows, which is where
+  it belongs here too.
+- **No snooze, pin, archive, or delete on the swipe.** T3 Code's panel has a secondary Snooze
+  column and a long-press context menu carrying the rest; we render one action.
+- **The swipe action has no non-gesture equivalent.** T3 Code's long-press menu is what makes Settle
+  reachable with a screen reader; without it the action is gesture-only.
+- **No full-swipe commit and no haptics.** T3 Code commits the primary action on a long swipe past
+  `actionsWidth + 44` and fires an impact as that threshold arms. Haptics would need a new
+  `expect`/`actual` in `:core:common` first.
 - **`autoSettleAfterDays` is hardcoded to 3.** It is really a server setting; we decode only
   `environment` and `cwd` from `ServerConfig`, so the user's configured value is ignored.
 - **No change-request input.** T3 Code also settles on a merged PR and keeps a thread active while
@@ -360,7 +374,8 @@ build are the standard answer once this stops being copy-paste-able. Deliberatel
 because the JetBrains KMP templates this project follows use plain per-module build files.
 
 ### Server capability negotiation
-`ExecutionEnvironmentCapabilities` is decoded but almost unused. Several features must not be
-probed unless advertised (`threadSettlement`, `threadSnooze`, `threadPinning`, `pullRequests`,
-`connectionProbe`). Absent must mean unsupported, never a decode failure. Worth a single helper
-that gates calls rather than scattered checks.
+`ExecutionEnvironmentCapabilities` is decoded and now reaches the thread list: `EnvironmentShell`
+carries the flag set from `ServerConfig`, which is how the settle swipe stays hidden on a
+pre-settlement server. Absent must mean unsupported, never a decode failure. The remaining gates
+(`threadSnooze`, `threadPinning`, `pullRequests`, `connectionProbe`) are still checked ad hoc or not
+at all, and a single helper would beat scattered checks.

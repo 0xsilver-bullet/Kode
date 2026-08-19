@@ -46,6 +46,24 @@ class OrchestrationCommandTest {
     }
 
     @Test
+    fun `settle encodes as ids only`() {
+        // `ThreadSettleCommand` in the contracts carries no timestamp: the
+        // server stamps `settledAt` so two devices cannot disagree about when a
+        // thread was put down. `createdAt` is a getter with no backing field
+        // precisely so `encodeDefaults` cannot smuggle an empty one onto the
+        // wire, which the server would reject as a bad IsoDateTime.
+        val encoded = json.encodeToJsonElement(
+            ClientOrchestrationCommand.serializer(),
+            ThreadSettleCommand(commandId = "cmd-2", threadId = ThreadId("t1")),
+        ).jsonObject
+
+        assertEquals("thread.settle", encoded["type"]?.jsonPrimitive?.content)
+        assertEquals("cmd-2", encoded["commandId"]?.jsonPrimitive?.content)
+        assertEquals("t1", encoded["threadId"]?.jsonPrimitive?.content)
+        assertEquals(setOf("type", "commandId", "threadId"), encoded.keys)
+    }
+
+    @Test
     fun `encodes the nested user message with the required role and attachments`() {
         val message = json.encodeToJsonElement(ClientOrchestrationCommand.serializer(), command)
             .jsonObject["message"]!!.jsonObject

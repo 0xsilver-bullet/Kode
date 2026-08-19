@@ -174,6 +174,58 @@ class ThreadSettlementTest {
     }
 
     @Test
+    fun `a quiet thread is settleable even though it would auto-settle anyway`() {
+        // Pinning the state is the point: an auto-settled thread drifts back
+        // into the inbox on any activity, an explicitly settled one does not.
+        assertTrue(thread(latestUserMessageAt = longAgo).isSettleable(now))
+    }
+
+    @Test
+    fun `a running thread is not settleable`() {
+        assertFalse(
+            thread(
+                latestUserMessageAt = recently,
+                sessionStatus = SessionStatus.RUNNING,
+            ).isSettleable(now),
+        )
+    }
+
+    @Test
+    fun `a starting thread is not settleable`() {
+        assertFalse(
+            thread(
+                latestUserMessageAt = longAgo,
+                sessionStatus = SessionStatus.STARTING,
+            ).isSettleable(now),
+        )
+    }
+
+    @Test
+    fun `a thread waiting on an approval is not settleable`() {
+        assertFalse(thread(latestUserMessageAt = longAgo, hasPendingApprovals = true).isSettleable(now))
+    }
+
+    @Test
+    fun `a thread waiting on user input is not settleable`() {
+        assertFalse(thread(latestUserMessageAt = longAgo, hasPendingUserInput = true).isSettleable(now))
+    }
+
+    @Test
+    fun `a thread whose turn has not been picked up yet is not settleable`() {
+        assertFalse(thread(latestUserMessageAt = recently).isSettleable(now))
+    }
+
+    @Test
+    fun `an idle thread is settleable`() {
+        assertTrue(
+            thread(
+                latestUserMessageAt = "2026-08-15T12:00:00.000Z",
+                sessionStatus = SessionStatus.STOPPED,
+            ).isSettleable(now),
+        )
+    }
+
+    @Test
     fun `partitioning preserves order within each half`() {
         val threads = listOf(
             thread(id = "a", latestUserMessageAt = longAgo),

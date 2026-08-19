@@ -6,29 +6,44 @@ import androidx.lifecycle.viewModelScope
 import com.silverbullet.kode.core.common.TimeProvider
 import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.OrchestrationThreadShell
+import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.feature.threads.domain.EnvironmentShell
+import com.silverbullet.kode.feature.threads.domain.SettledOverride
 import com.silverbullet.kode.feature.threads.domain.SyncStatus
 import com.silverbullet.kode.feature.threads.domain.isEffectivelySettled
+import com.silverbullet.kode.feature.threads.domain.isSettleable
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * The merged inbox: every environment's threads in one list, newest activity
  * first, as T3 Code mobile renders its home list across all connections.
  */
 class ThreadListViewModel(
-    repository: ThreadsRepository,
+    private val repository: ThreadsRepository,
     private val timeProvider: TimeProvider,
 ) : ViewModel() {
 
     private val settledExpanded = MutableStateFlow(false)
+    private val actionError = MutableStateFlow<String?>(null)
+
+    /**
+     * Threads with a settle in flight.
+     *
+     * Not a `StateFlow`: nothing renders it, and making it observable would
+     * recompose the list twice per tap for no visible change. It exists only so
+     * a double tap — or a tap on a row the list has re-emitted underneath the
+     * finger — cannot dispatch the command twice.
+     */
+    private val settling = mutableSetOf<String>()
 
     val uiState: StateFlow<ThreadListUiState> =
-        combine(repository.shells, settledExpanded) { shells, expanded ->
+        combine(repository.shells, settledExpanded, actionError) { shells, expanded, error ->
             // One `now` for the whole partition, so two threads on either side
             // of the auto-settle boundary cannot be judged against different
             // clocks within a single list.
@@ -66,6 +81,12 @@ class ThreadListViewModel(
                     )
                         .joinToString(" · ")
                         .ifEmpty { thread.updatedAt },
+                    // Also precomputed: the row is the wrong place to be
+                    // reading capabilities and re-deriving the same predicate
+                    // on every scroll.
+                    canSettle = environment.capabilities.threadSettlement &&
+                        thread.settledOverride != SettledOverride.SETTLED &&
+                        thread.isSettleable(now),
                 )
             }
 
@@ -85,6 +106,7 @@ class ThreadListViewModel(
                 activeCount = active.size,
                 settledCount = settled.size,
                 error = shells.firstNotNullOfOrNull { it.shell.error },
+                actionError = error,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -98,6 +120,37 @@ class ThreadListViewModel(
     /** The shelf starts collapsed: settled threads are history, not the inbox. */
     fun toggleSettledShelf() {
         settledExpanded.value = !settledExpanded.value
+    }
+
+    /**
+     * Files a thread away as finished business.
+     *
+     * Nothing is held optimistically. A settled thread stays in the live shell
+     * stream — settled is not archived — so the server's echo re-partitions the
+     * list within a round trip, and inventing a local hold would only add a
+     * state that could disagree with it.
+     *
+     * The command's preconditions are already checked when the row is built
+     * ([ThreadRow.canSettle]), so a failure here means they changed under us or
+     * the connection went away; either way it is worth saying out loud rather
+     * than swallowing.
+     */
+    fun settleThread(environmentId: EnvironmentId, threadId: ThreadId) {
+        val key = environmentId.value + ":" + threadId.value
+        if (!settling.add(key)) return
+
+        viewModelScope.launch {
+            actionError.value = null
+            val failure = repository.settleThread(environmentId, threadId).exceptionOrNull()
+            settling.remove(key)
+            if (failure != null) {
+                actionError.value = failure.message ?: "Could not settle thread."
+            }
+        }
+    }
+
+    fun dismissActionError() {
+        actionError.value = null
     }
 
     private companion object {
@@ -126,6 +179,8 @@ data class ThreadListUiState(
     val activeCount: Int = 0,
     val settledCount: Int = 0,
     val error: String? = null,
+    /** A rejected row action, distinct from [error]'s synchronization failure. */
+    val actionError: String? = null,
 ) {
     /**
      * Distinguishes "still loading" from "genuinely nothing here", so a
@@ -160,4 +215,11 @@ data class ThreadRow(
     val environmentId: EnvironmentId,
     val thread: OrchestrationThreadShell,
     val subtitle: String,
+    /**
+     * Whether the swipe action should be offered at all: the server supports
+     * settling, the thread is not already pinned settled, and none of the
+     * decider's blockers apply. Offering a button that can only fail would be
+     * worse than not offering one.
+     */
+    val canSettle: Boolean = false,
 )
