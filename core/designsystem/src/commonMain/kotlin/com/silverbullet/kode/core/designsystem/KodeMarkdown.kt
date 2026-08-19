@@ -120,7 +120,12 @@ internal fun rememberKodeMarkdownConfig(): KodeMarkdownConfig {
     val annotator = markdownAnnotator()
     val extendedSpans = markdownExtendedSpans()
     val inlineContent = markdownInlineContent()
-    val components = markdownComponents()
+    // Tables are the one element whose default rendering is unusable on a
+    // phone: fixed-share columns with single-line, ellipsed cells and no way to
+    // reach the clipped text. See [KodeMarkdownTable].
+    val components = markdownComponents(
+        table = { model -> KodeMarkdownTable(model.content, model.node, model.typography.table) },
+    )
     // The default applies `animateContentSize()` to *every* text segment of
     // every message. During a stream that runs a size animation per paragraph
     // per frame, continuously invalidating the lazy item's layout and making
