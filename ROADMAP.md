@@ -298,10 +298,28 @@ still shows text cost, the fix is custom
 `markdownComponents(paragraph = …, text = …, heading1..6 = …)` backed by a process-level
 `LruCache<Key, AnnotatedString>`.
 
-### Activity icons are approximations
-`KodeIcons` hand-builds the twelve glyphs T3 Code's feed uses. T3 Code uses Tabler icons; these are
-shape-equivalent, not identical. `material-icons-core` is only published up to Compose 1.7.x, so it
-cannot be mixed with Compose 1.11 without conflicts.
+### Icons — owned, generated from Tabler SVGs
+`KodeIcons` is generated rather than hand-drawn: all 27 glyphs are transliterated from the Tabler
+outline SVGs committed in `core/designsystem/icons/`, the same set T3 Code uses. The converter maps
+SVG path commands one-for-one onto Compose's `PathBuilder`, so nothing is approximated, and
+`generate_kodeicons.py` reproduces the committed file byte-for-byte. Read that directory's README
+before adding a glyph: an icon added by hand-editing `KodeIcons.kt` is lost on the next regeneration.
+
+No icon-pack dependency, deliberately. The KMP packs (`com.composables:icons-*-cmp`,
+`br.com.devsrsouza.compose.icons:*`) do compile one strippable class per icon, but they only shrink
+back down if R8 runs, and `androidApp` has `isMinifyEnabled = false` — the Tabler-outline artifact is
+16.7 MB of classes, all of which would be dexed. They are also published against Kotlin 2.2.21 /
+Compose 1.9.3 versus our 2.4.10 / 1.11.1. Owning 27 icons means the APK carries 27. Worth revisiting
+if minification gets enabled and the set grows past a hundred or so.
+
+`ImageVector` rather than a vector drawable because every call site is in `commonMain`:
+`res/drawable` is Android-only, and `composeResources/drawable` is packaged verbatim with no
+dead-resource elimination, plus an XML parse on first use.
+
+Two traps. The converter only reads single-colour `<path>` elements, so a glyph built from
+`<circle>`/`<rect>` or carrying fills needs it extended rather than silently losing geometry. And
+`KodeIcons.GitBranch` is Tabler's `git-merge`, matching the glyph T3 Code maps its git control to on
+non-SF platforms — not `git-branch`, despite the property name.
 
 ### Diffs, terminals, previews, pull requests
 Whole RPC surfaces untouched: `review.*`, `terminal.*`, `preview.*`, `pullRequests.*`, `vcs.*`.
