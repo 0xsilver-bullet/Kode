@@ -30,6 +30,7 @@ ICONS = [
     ("ArrowDown",    "arrow-down",     None),
     ("ArrowUpRight", "arrow-up-right", None),
     ("Mic",          "microphone",     None),
+    ("Folder",       "folder",         "A project, in the thread list."),
 ]
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
@@ -68,8 +69,8 @@ import androidx.compose.ui.unit.dp
  * from their SVGs one-for-one, rather than pulled from an icon library. Two
  * reasons: `material-icons-core` is only published up to Compose 1.7.x, and
  * every icon pack on Maven ships thousands of icons that only shrink back down
- * if R8 runs, which the release build does not currently enable. Owning the 27
- * we use means the APK carries exactly 27.
+ * if R8 runs, which the release build does not currently enable. Owning the 28
+ * we use means the APK carries exactly 28.
  *
  * The SVG sources and the converter live in `core/designsystem/icons/`; see the
  * README there before adding a glyph.
@@ -114,4 +115,5 @@ private fun strokeIcon(name: String, build: PathBuilder.() -> Unit): ImageVector
     }.build()
 '''
 
-print(head + '\n'.join(body) + '\n' + tail, end='')
+if __name__ == '__main__':
+    print(head + '\n'.join(body) + '\n' + tail, end='')

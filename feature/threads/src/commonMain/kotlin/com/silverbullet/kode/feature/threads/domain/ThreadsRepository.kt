@@ -8,6 +8,8 @@ import com.silverbullet.kode.core.model.DispatchResult
 import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ExecutionEnvironmentCapabilities
 import com.silverbullet.kode.core.model.MessageRole
+import com.silverbullet.kode.core.model.OrchestrationThreadShell
+import com.silverbullet.kode.core.model.ServerProvider
 import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.core.model.ModelSelection
 import com.silverbullet.kode.core.model.ProjectId
@@ -58,8 +60,30 @@ data class EnvironmentShell(
      * dispatching a command the server would reject.
      */
     val capabilities: ExecutionEnvironmentCapabilities = ExecutionEnvironmentCapabilities(),
+    /**
+     * The provider instances this server runs, unfiltered.
+     *
+     * Not [ProviderCatalog]: that drops everything unselectable, and a thread
+     * already running on a since-disabled instance still has to be able to say
+     * which agent is running it.
+     */
+    val providers: List<ServerProvider> = emptyList(),
 ) {
     val isConnected: Boolean get() = connection is ConnectionState.Connected
+
+    /**
+     * The driver kind running [thread], or null when nothing here can say.
+     *
+     * The thread's session names the instance it actually started on; before a
+     * session exists the model selection names the one it is pointed at. Port of
+     * the `providerDriver` lookup in `HomeScreen.tsx`.
+     */
+    fun driverFor(thread: OrchestrationThreadShell): String? {
+        val instanceId = thread.session?.providerInstanceId
+            ?: thread.modelSelection?.instanceId
+            ?: return null
+        return providers.firstOrNull { it.instanceId == instanceId }?.driver
+    }
 }
 
 /**
@@ -129,6 +153,7 @@ class ThreadsRepository(
                 // server, and it flips to the real set on the next emission.
                 capabilities = config?.environment?.capabilities
                     ?: ExecutionEnvironmentCapabilities(),
+                providers = config?.providers.orEmpty(),
             )
         }
     }

@@ -46,19 +46,52 @@ def emit(cmd, args):
             'true' if large else 'false', 'true' if sweep else 'false', fmt(x), fmt(y))
     return '%s(%s)' % (name, ', '.join(fmt(a) for a in args))
 
+def build(d):
+    """One path's `d` as `PathBuilder` source lines, one line per subpath."""
+    lines, buf = [], []
+    for call in (emit(c, a) for c, a in tokens(d)):
+        if call.startswith(('moveTo(', 'moveToRelative(')) and buf:
+            lines.append('; '.join(buf)); buf = []
+        buf.append(call)
+    if buf:
+        lines.append('; '.join(buf))
+    return lines
+
 def convert(svg):
+    """Every `<path>` folded into one stroked path — the Tabler outline case."""
     lines = []
     for d in re.findall(r'<path[^>]*\sd="([^"]+)"', svg):
-        calls = [emit(c, a) for c, a in tokens(d)]
-        # One source line per subpath keeps the generated code diffable.
-        buf = []
-        for call in calls:
-            if call.startswith(('moveTo(', 'moveToRelative(')) and buf:
-                lines.append('; '.join(buf)); buf = []
-            buf.append(call)
-        if buf:
-            lines.append('; '.join(buf))
+        lines.extend(build(d))
     return lines
+
+# A `<rect>` is the one non-`<path>` shape the brand marks use. Expressed as
+# explicit line segments rather than approximated, so the geometry survives.
+def rect_path(attrs):
+    if 'rx' in attrs or 'ry' in attrs:
+        raise ValueError('rounded rect is not supported: %r' % attrs)
+    x, y = float(attrs.get('x', 0)), float(attrs.get('y', 0))
+    w, h = float(attrs['width']), float(attrs['height'])
+    return 'M%g %gH%gV%gH%gZ' % (x, y, x + w, y + h, x)
+
+ATTR = re.compile(r'([a-zA-Z-]+)="([^"]*)"')
+
+def shapes(svg):
+    """
+    Every filled shape in document order, as `(fill, even_odd, lines)`.
+
+    Document order is the paint order, so the caller must keep it: the brand
+    marks layer a shade under a mark.
+    """
+    out = []
+    for tag, body in re.findall(r'<(path|rect)\b([^>]*)>', svg):
+        attrs = dict(ATTR.findall(body))
+        d = attrs['d'] if tag == 'path' else rect_path(attrs)
+        out.append((
+            attrs.get('fill'),
+            attrs.get('fill-rule') == 'evenodd',
+            build(d),
+        ))
+    return out
 
 if __name__ == '__main__':
   for path in sys.argv[1:]:

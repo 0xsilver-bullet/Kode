@@ -190,6 +190,38 @@ Not done:
 - **No snooze shelf and no settled-tail paging.** T3 Code renders active → pending → snoozed →
   settled, and pages the deep settled tail behind "Show more". We render active → settled, all of it.
 
+### Thread list rows — T3 Code's card/slim split
+Rows follow `thread-list-v2-items.tsx` rather than a title-and-subtitle line. An active row carries
+a folder glyph and project title, a coloured status label (`resolveThreadListV2Status`, ported to
+`rowStatus()` in `ThreadRowPresentation.kt`) or the thread's relative age in the same slot, the
+title over up to two lines, and `branch · machine` beside the agent's vendor mark. Settled rows
+recede to a slim title-and-age line. Every field is precomputed in `ThreadListViewModel` — the row
+is the wrong place to be re-parsing timestamps or re-scanning the provider list on every scroll —
+and a minute heartbeat keeps the ages moving on a list that is otherwise only redrawn when the
+server says something.
+
+Status hues are T3 Code's convention (colour for "act now", "in motion" and "broken") mapped onto
+Kanagawa rather than its Tailwind palette, so a status reads like the rest of the app.
+
+`rowStatus()` departs from the port in one place, deliberately: T3 Code reads only the session, so a
+thread whose background work outlived its turn reads as quiet. We fall back to
+`OrchestrationThreadShell.isBusy` — this app's broader reading of "in motion", which also counts a
+running turn and `backgroundLiveness` — because that is what the row indicated before. It is checked
+last, so a broken session still reports **Failed** rather than being masked by work still moving.
+
+The vendor marks are the vendors' own published SVGs, converted to `ImageVector`s by
+`generate_brandmarks.py` — see `core/designsystem/icons/README.md`. Claude and OpenCode are drawn;
+every other driver kind falls back to the generic agent glyph, which says "some agent" rather than
+guessing which.
+
+Not done:
+- **No project favicons.** T3 Code fetches each project's favicon through `assets.createUrl` and
+  falls back to the folder glyph. We always draw the glyph.
+- **No PR badge on the row.** T3 Code shows `#123` in the branch line, coloured by state; we have no
+  pull-request surface.
+- **No search, filter, or pinned block.** The list is the merged inbox, in activity order, with the
+  settled shelf as its only structure.
+
 ### Thread creation — implemented, without branch or worktree choice
 `thread.create` from a New thread screen: project (from `subscribeShell`'s projects), title, model,
 permissions, and mode.

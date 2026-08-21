@@ -10,14 +10,20 @@ import com.silverbullet.kode.core.model.ThreadId
 import com.silverbullet.kode.feature.threads.domain.EnvironmentShell
 import com.silverbullet.kode.feature.threads.domain.SettledOverride
 import com.silverbullet.kode.feature.threads.domain.SyncStatus
+import com.silverbullet.kode.feature.threads.domain.ThreadRowStatus
 import com.silverbullet.kode.feature.threads.domain.isEffectivelySettled
 import com.silverbullet.kode.feature.threads.domain.isSettleable
+import com.silverbullet.kode.feature.threads.domain.relativeTimeLabel
+import com.silverbullet.kode.feature.threads.domain.rowStatus
+import com.silverbullet.kode.feature.threads.domain.rowTimestamp
 import com.silverbullet.kode.feature.threads.domain.ThreadsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -33,6 +39,23 @@ class ThreadListViewModel(
     private val actionError = MutableStateFlow<String?>(null)
 
     /**
+     * A minute heartbeat, so the rows' relative ages keep moving on a list that
+     * is otherwise only redrawn when the server says something.
+     *
+     * A minute is the finest granularity [relativeTimeLabel] renders, so nothing
+     * is missed by not ticking faster. It also re-judges the auto-settle
+     * boundary, which was previously only reconsidered when data arrived. Wasted
+     * recompositions are not a concern: an emission that changes no label
+     * produces an equal [ThreadListUiState], and `stateIn` conflates it away.
+     */
+    private val minuteTick = flow {
+        while (true) {
+            emit(Unit)
+            delay(TICK_INTERVAL_MILLIS)
+        }
+    }
+
+    /**
      * Threads with a settle in flight.
      *
      * Not a `StateFlow`: nothing renders it, and making it observable would
@@ -43,13 +66,16 @@ class ThreadListViewModel(
     private val settling = mutableSetOf<String>()
 
     val uiState: StateFlow<ThreadListUiState> =
-        combine(repository.shells, settledExpanded, actionError) { shells, expanded, error ->
+        combine(
+            repository.shells,
+            settledExpanded,
+            actionError,
+            minuteTick,
+        ) { shells, expanded, error, _ ->
             // One `now` for the whole partition, so two threads on either side
             // of the auto-settle boundary cannot be judged against different
             // clocks within a single list.
             val now = timeProvider.nowIso()
-            // The environment label only earns a place in the subtitle once it
-            // disambiguates anything.
             val multiEnvironment = shells.size > 1
 
             val merged = shells
@@ -66,24 +92,36 @@ class ThreadListViewModel(
                 if (entry.second.isEffectivelySettled(now)) settled += entry else active += entry
             }
 
-            fun row(entry: Pair<EnvironmentShell, OrchestrationThreadShell>): ThreadRow {
+            // One `now` in milliseconds too, so every row's age is measured
+            // against the same instant the partition was judged at.
+            val nowMillis = timeProvider.nowMillis()
+
+            fun row(
+                entry: Pair<EnvironmentShell, OrchestrationThreadShell>,
+                variant: ThreadRowVariant,
+            ): ThreadRow {
                 val (environment, thread) = entry
-                val project = environment.shell.projectFor(thread)
+                val status = thread.rowStatus()
                 return ThreadRow(
                     environmentId = environment.environmentId,
                     thread = thread,
-                    // Precomputed here rather than in the row: it allocated
-                    // a list and two strings per row per composition.
-                    subtitle = listOfNotNull(
-                        project?.title,
-                        thread.branch,
-                        environment.label.takeIf { multiEnvironment },
-                    )
-                        .joinToString(" · ")
-                        .ifEmpty { thread.updatedAt },
-                    // Also precomputed: the row is the wrong place to be
-                    // reading capabilities and re-deriving the same predicate
-                    // on every scroll.
+                    variant = variant,
+                    // Everything below is precomputed here rather than derived
+                    // in the row: the row is the wrong place to be re-reading
+                    // capabilities, re-parsing timestamps and re-scanning the
+                    // provider list on every scroll.
+                    projectTitle = environment.shell.projectFor(thread)?.title,
+                    status = status,
+                    timeLabel = relativeTimeLabel(thread.rowTimestamp(), nowMillis),
+                    // The label only earns a place on the row once it
+                    // disambiguates something.
+                    environmentLabel = environment.label.takeIf { multiEnvironment },
+                    providerDriver = environment.driverFor(thread),
+                    // Only surfaced on a failed row, where it replaces the
+                    // branch line: elsewhere it is a stale error from a turn
+                    // that has since recovered.
+                    errorText = thread.session?.lastError
+                        ?.takeIf { status == ThreadRowStatus.Failed },
                     canSettle = environment.capabilities.threadSettlement &&
                         thread.settledOverride != SettledOverride.SETTLED &&
                         thread.isSettleable(now),
@@ -91,11 +129,13 @@ class ThreadListViewModel(
             }
 
             val items = buildList {
-                active.forEach { add(ThreadListItem.Thread(row(it))) }
+                active.forEach { add(ThreadListItem.Thread(row(it, ThreadRowVariant.Card))) }
                 if (settled.isNotEmpty()) {
                     add(ThreadListItem.SettledShelf(settled.size, expanded))
                     if (expanded) {
-                        settled.forEach { add(ThreadListItem.Thread(row(it))) }
+                        settled.forEach {
+                            add(ThreadListItem.Thread(row(it, ThreadRowVariant.Slim)))
+                        }
                     }
                 }
             }
@@ -155,6 +195,7 @@ class ThreadListViewModel(
 
     private companion object {
         const val STOP_TIMEOUT_MILLIS = 5_000L
+        const val TICK_INTERVAL_MILLIS = 60_000L
 
         /**
          * The most optimistic honest summary: live only when every environment
@@ -210,11 +251,31 @@ sealed interface ThreadListItem {
     }
 }
 
+/**
+ * How much of a row is drawn.
+ *
+ * Two idioms rather than one dimmed variant, following T3 Code's card/slim
+ * split: settled threads are history, and history that keeps a project line, a
+ * status and a branch competes for attention with the work that still wants it.
+ */
+enum class ThreadRowVariant { Card, Slim }
+
 @Immutable
 data class ThreadRow(
     val environmentId: EnvironmentId,
     val thread: OrchestrationThreadShell,
-    val subtitle: String,
+    val variant: ThreadRowVariant,
+    /** Null while the shell has the thread but not yet its project. */
+    val projectTitle: String?,
+    val status: ThreadRowStatus,
+    /** How long ago the thread was last touched, e.g. `13h`. */
+    val timeLabel: String,
+    /** Which machine hosts it, or null when only one environment is connected. */
+    val environmentLabel: String?,
+    /** The driver kind running it, for the vendor mark. Null if unknown. */
+    val providerDriver: String?,
+    /** The session's last error, on a failed row only. */
+    val errorText: String?,
     /**
      * Whether the swipe action should be offered at all: the server supports
      * settling, the thread is not already pinned settled, and none of the

@@ -53,6 +53,17 @@ val LocalKodeColors = staticCompositionLocalOf<KodeExtendedColors> {
     error("KodeExtendedColors requested outside of KodeTheme.")
 }
 
+/**
+ * Which variant is active.
+ *
+ * Read rather than `isSystemInDarkTheme()` so a host that pins [KodeTheme]'s
+ * `darkTheme` is not disagreed with. It exists for the few things that are not
+ * a colour to resolve — a brand mark published once per colour scheme.
+ */
+private val LocalKodeDarkTheme = staticCompositionLocalOf<Boolean> {
+    error("KodeTheme's variant requested outside of KodeTheme.")
+}
+
 private val WaveColorScheme = darkColorScheme(
     primary = Kanagawa.Wave.crystalBlue,
     onPrimary = Kanagawa.Wave.sumiInk0,
@@ -188,6 +199,7 @@ fun KodeTheme(
 ) {
     CompositionLocalProvider(
         LocalKodeColors provides if (darkTheme) WaveExtendedColors else LotusExtendedColors,
+        LocalKodeDarkTheme provides darkTheme,
         LocalMarkdownParseCache provides markdownParseCache,
     ) {
         MaterialTheme(
@@ -217,4 +229,10 @@ object KodeTheme {
         @Composable
         @ReadOnlyComposable
         get() = LocalKodeColors.current
+
+    /** True under the Wave (dark) variant, false under Lotus (light). */
+    val isDark: Boolean
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalKodeDarkTheme.current
 }

@@ -16,8 +16,8 @@ import androidx.compose.ui.unit.dp
  * from their SVGs one-for-one, rather than pulled from an icon library. Two
  * reasons: `material-icons-core` is only published up to Compose 1.7.x, and
  * every icon pack on Maven ships thousands of icons that only shrink back down
- * if R8 runs, which the release build does not currently enable. Owning the 27
- * we use means the APK carries exactly 27.
+ * if R8 runs, which the release build does not currently enable. Owning the 28
+ * we use means the APK carries exactly 28.
  *
  * The SVG sources and the converter live in `core/designsystem/icons/`; see the
  * README there before adding a glyph.
@@ -352,6 +352,17 @@ object KodeIcons {
             moveTo(5f, 10f); arcToRelative(7f, 7f, 0f, false, false, 14f, 0f)
             moveTo(8f, 21f); lineToRelative(8f, 0f)
             moveTo(12f, 17f); lineToRelative(0f, 4f)
+        }
+    }
+
+    /** A project, in the thread list. */
+    val Folder: ImageVector by lazy {
+        strokeIcon("Folder") { // tabler/folder
+            moveTo(5f, 4f); horizontalLineToRelative(4f); lineToRelative(3f, 3f);
+            horizontalLineToRelative(7f); arcToRelative(2f, 2f, 0f, false, true, 2f, 2f);
+            verticalLineToRelative(8f); arcToRelative(2f, 2f, 0f, false, true, -2f, 2f);
+            horizontalLineToRelative(-14f); arcToRelative(2f, 2f, 0f, false, true, -2f, -2f);
+            verticalLineToRelative(-11f); arcToRelative(2f, 2f, 0f, false, true, 2f, -2f)
         }
     }
 }
