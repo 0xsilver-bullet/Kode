@@ -41,9 +41,11 @@ enum class AppActivation {
  *
  * Below this the socket has almost certainly survived; above it, Doze and
  * network-stack teardown make a silent kill likely enough that probing is
- * slower than reconnecting.
+ * slower than reconnecting. The value matches
+ * `MOBILE_BACKGROUND_RECONNECT_AFTER_MS` in
+ * `apps/mobile/src/connection/app-state-wakeups.ts`.
  */
-const val MEANINGFUL_SUSPENSION_MILLIS: Long = 30_000
+const val MEANINGFUL_SUSPENSION_MILLIS: Long = 10_000
 
 /** Used on platforms that do not supply a real monitor yet, such as iOS. */
 class AlwaysOnlineNetworkMonitor : NetworkMonitor {

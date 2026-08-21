@@ -8,11 +8,12 @@ import com.silverbullet.kode.core.common.NoOpAppLifecycleMonitor
 import com.silverbullet.kode.core.datastore.EnvironmentRecord
 import com.silverbullet.kode.core.network.EnvironmentAuthApi
 import com.silverbullet.kode.core.network.EnvironmentAuthException
+import com.silverbullet.kode.core.network.RpcTransport
 import com.silverbullet.kode.core.network.T3EnvironmentClient
 import com.silverbullet.kode.core.model.ServerConfig
-import com.silverbullet.kode.core.network.WebSocketRpcTransport
 import com.silverbullet.kode.core.rpc.RpcConnection
 import com.silverbullet.kode.core.rpc.RpcCallException
+import com.silverbullet.kode.core.rpc.RpcTransportException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -43,12 +44,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  - a connection stable for 30s resets the accumulated backoff;
  *  - authentication and configuration failures stay blocked, consuming no
  *    retries and running no timer, until an external wakeup changes the input;
- *  - an explicit retry interrupts backoff immediately.
+ *  - an explicit retry, or a return to the foreground, interrupts backoff
+ *    immediately and resets the ladder;
+ *  - a session the supervisor drops on purpose — a resume after suspension,
+ *    an explicit retry, a failed wake probe — reconnects at once with the
+ *    ladder reset, because the user is actively looking at the app.
  */
 class EnvironmentSupervisor(
     private val record: EnvironmentRecord,
     private val authApi: EnvironmentAuthApi,
-    private val transport: WebSocketRpcTransport,
+    private val transport: RpcTransport,
     private val networkMonitor: NetworkMonitor = AlwaysOnlineNetworkMonitor(),
     private val appLifecycleMonitor: AppLifecycleMonitor = NoOpAppLifecycleMonitor(),
     private val timeSource: TimeSource = TimeSource.Monotonic,
@@ -138,6 +143,10 @@ class EnvironmentSupervisor(
                 _state.value = ConnectionState.Offline
                 online.first { it }
                 attempt = 0
+                // Wakeups that piled up while offline were aimed at a session
+                // that no longer exists; consuming them keeps a stale resume
+                // from immediately superseding the attempt about to start.
+                drainWakeups()
             }
 
             if (attempt == 0) _state.value = ConnectionState.Connecting
@@ -150,6 +159,17 @@ class EnvironmentSupervisor(
                 throw cancellation
             } catch (thrown: Throwable) {
                 thrown
+            }
+
+            if (failure is ConnectionAttemptSupersededException) {
+                // The supervisor dropped this session or attempt itself in
+                // response to the user — a resume after suspension, an explicit
+                // retry, a failed wake probe. They are looking at the app right
+                // now, so reconnect immediately with the ladder reset instead
+                // of sleeping a backoff rung against our own decision. This is
+                // `resetRetryLadder` + `continue` in `supervisor.ts`.
+                attempt = 0
+                continue
             }
 
             if (failure.isBlocking()) {
@@ -168,10 +188,19 @@ class EnvironmentSupervisor(
                 detail = failure.describe(),
             )
 
-            // An explicit retry resets the ladder; a plain foreground wakeup
-            // only skips the remaining delay.
+            // Any wakeup interrupts the backoff and resets the ladder: an
+            // explicit retry and a return to the foreground both mean "the
+            // user is watching, try now" — `supervisor.ts` calls
+            // `resetRetryLadder` for every application-active signal here.
             val wakeup = withTimeoutOrNull(delay) { wakeups.receive() }
-            if (wakeup == Wakeup.ExplicitRetry) attempt = 0
+            if (wakeup != null) attempt = 0
+        }
+    }
+
+    /** Empties the conflated wakeup channel (it holds at most one element). */
+    private fun drainWakeups() {
+        while (wakeups.tryReceive().isSuccess) {
+            // Consumed deliberately.
         }
     }
 
@@ -181,7 +210,26 @@ class EnvironmentSupervisor(
      * `server.getConfig` gates the transition to [ConnectionState.Connected]:
      * an open socket alone does not prove the server is responsive.
      */
-    private suspend fun runSession(record: EnvironmentRecord) {
+    private suspend fun runSession(record: EnvironmentRecord): Unit = coroutineScope {
+        // While establishing there is no lease monitor to receive wakeups, but
+        // the conflated channel keeps the latest one. Left unconsumed, a resume
+        // that lands here would wait out the whole establishment and then be
+        // read by the fresh lease as an order to tear down the session it just
+        // asked for. So wakeups are consumed for the establishment's duration:
+        // a resume after suspension aborts the attempt — it may be stalled on a
+        // transport that died while the app was suspended — and anything else
+        // is redundant while an attempt is already running. This is
+        // `waitForEstablishmentInterrupt` in `supervisor.ts`.
+        val establishmentInterruptor = launch {
+            while (true) {
+                if (wakeups.receive() == Wakeup.ApplicationActiveReconnect) {
+                    throw ConnectionAttemptSupersededException(
+                        "Restarting the connection attempt after returning to the foreground.",
+                    )
+                }
+            }
+        }
+
         val ticket = authApi.issueWebSocketTicket(
             httpBaseUrl = record.httpBaseUrl,
             accessToken = record.accessToken,
@@ -190,7 +238,19 @@ class EnvironmentSupervisor(
 
         transport.connect(socketUrl) { connection ->
             val client = T3EnvironmentClient(connection)
-            val config = client.getConfig()
+            // `withTimeoutOrNull` rather than `withTimeout`: the latter throws
+            // a CancellationException subtype, which the supervisor loop would
+            // read as its own cancellation and stop supervising entirely. The
+            // bound matches CONNECTION_ESTABLISHMENT_TIMEOUT in `supervisor.ts`
+            // and covers the one establishment step nothing else bounds — a
+            // server that answers pings but never answers the first call.
+            val config = withTimeoutOrNull(ESTABLISHMENT_TIMEOUT) { client.getConfig() }
+                ?: throw RpcTransportException(
+                    "The server did not respond during connection setup.",
+                )
+
+            // Establishment is over: wakeups from here on belong to the lease.
+            establishmentInterruptor.cancel()
 
             _state.value = ConnectionState.Connected(
                 environment = config.environment,
@@ -252,17 +312,29 @@ class EnvironmentSupervisor(
                         Wakeup.ApplicationActive -> {
                             // Probing costs one round trip; being wrong costs a
                             // full reconnect, so probe first and only replace
-                            // the lease if it actually fails.
-                            val healthy = runCatching { client.probe(config) }.isSuccess
+                            // the lease if it actually fails. Bounded by the
+                            // mobile probe timeout from `supervisor.ts`: a
+                            // probe against a silently dead socket would
+                            // otherwise wait for the ping watchdog while the
+                            // user stares at stale data.
+                            val healthy = try {
+                                withTimeoutOrNull(PROBE_TIMEOUT) {
+                                    client.probe(config)
+                                } != null
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (_: Throwable) {
+                                false
+                            }
                             if (!healthy) {
-                                throw ConnectionReleasedException(
+                                throw ConnectionAttemptSupersededException(
                                     "The session stopped responding after returning to the foreground.",
                                 )
                             }
                         }
 
                         Wakeup.ApplicationActiveReconnect, Wakeup.ExplicitRetry ->
-                            throw ConnectionReleasedException("Replacing the session.")
+                            throw ConnectionAttemptSupersededException("Replacing the session.")
                     }
                 }
             }
@@ -299,10 +371,21 @@ class EnvironmentSupervisor(
     }
 
     private companion object {
-        /** Exponential ladder capped at 16s, matching `RETRY_DELAYS_MS`. */
+        /**
+         * Exponential ladder capped at 16s. Deliberately starts lower than
+         * `RETRY_DELAYS_MS` (3s, 4s, 8s, 16s): a phone regains its footing in
+         * bursts, and the first rung being sub-second is what makes a flaky
+         * reconnect feel instant. The cap and the retry-forever policy match.
+         */
         val RETRY_DELAYS = listOf(500, 1_000, 2_000, 4_000, 8_000, 16_000)
             .map { it.milliseconds }
         val STABILITY_RESET = 30.seconds
+
+        /** `CONNECTION_ESTABLISHMENT_TIMEOUT` in `supervisor.ts`. */
+        val ESTABLISHMENT_TIMEOUT = 15.seconds
+
+        /** `MOBILE_CONNECTION_PROBE_TIMEOUT` in `supervisor.ts`. */
+        val PROBE_TIMEOUT = 3.seconds
 
         fun backoffFor(attempt: Int) =
             RETRY_DELAYS[(attempt - 1).coerceIn(0, RETRY_DELAYS.lastIndex)]
@@ -317,6 +400,14 @@ private val SessionEnded = RuntimeException("The session ended.")
  * it always wants a replacement, never a blocked state.
  */
 private class ConnectionReleasedException(message: String) : RuntimeException(message)
+
+/**
+ * The supervisor dropped a session or attempt because the user demanded a
+ * fresh one — a resume after suspension, an explicit retry, a failed wake
+ * probe. Unlike [ConnectionReleasedException] it skips the backoff timer
+ * entirely and resets the ladder: the user is actively waiting.
+ */
+private class ConnectionAttemptSupersededException(message: String) : RuntimeException(message)
 
 /**
  * Distinguishes "the input is wrong" from "the network misbehaved".

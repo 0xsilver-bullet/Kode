@@ -1,5 +1,6 @@
 package com.silverbullet.kode.core.session
 
+import com.silverbullet.kode.core.common.AppActivation
 import com.silverbullet.kode.core.common.AppLifecycleMonitor
 import com.silverbullet.kode.core.common.NetworkMonitor
 import com.silverbullet.kode.core.datastore.EnvironmentCatalogStore
@@ -7,8 +8,9 @@ import com.silverbullet.kode.core.datastore.EnvironmentRecord
 import com.silverbullet.kode.core.model.EnvironmentId
 import com.silverbullet.kode.core.model.ServerConfig
 import com.silverbullet.kode.core.network.EnvironmentAuthApi
+import com.silverbullet.kode.core.network.RpcTransport
 import com.silverbullet.kode.core.network.T3EnvironmentClient
-import com.silverbullet.kode.core.network.WebSocketRpcTransport
+import com.silverbullet.kode.core.network.evictIdleHttpConnections
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -54,7 +56,7 @@ class EnvironmentHandle internal constructor(
 class EnvironmentFleet(
     private val store: EnvironmentCatalogStore,
     private val authApi: EnvironmentAuthApi,
-    private val transport: WebSocketRpcTransport,
+    private val transport: RpcTransport,
     private val networkMonitor: NetworkMonitor,
     private val appLifecycleMonitor: AppLifecycleMonitor,
 ) {
@@ -72,6 +74,20 @@ class EnvironmentFleet(
     fun start(scope: CoroutineScope) {
         scope.launch {
             store.environments.collect { records -> reconcile(scope, records) }
+        }
+        scope.launch {
+            appLifecycleMonitor.activations.collect { activation ->
+                if (activation == AppActivation.ResumedAfterSuspension) {
+                    // A long suspension is exactly when pooled keep-alive
+                    // connections die without the kernel ever seeing a close.
+                    // Reusing one stalls the reconnect's first request until
+                    // its timeout, which is why a killed-and-relaunched app
+                    // used to connect faster than a resumed one. Evicting the
+                    // idle pool makes every supervisor's reconnect start on
+                    // fresh sockets, like a cold launch.
+                    evictIdleHttpConnections()
+                }
+            }
         }
     }
 

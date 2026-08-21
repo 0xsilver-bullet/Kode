@@ -1,6 +1,7 @@
 package com.silverbullet.kode.core.network.di
 
 import com.silverbullet.kode.core.network.EnvironmentAuthApi
+import com.silverbullet.kode.core.network.RpcTransport
 import com.silverbullet.kode.core.network.WebSocketRpcTransport
 import com.silverbullet.kode.core.network.createKodeHttpClient
 import org.koin.dsl.module
@@ -12,5 +13,5 @@ import org.koin.dsl.module
 val networkModule = module {
     single { createKodeHttpClient() }
     single { EnvironmentAuthApi(httpClient = get()) }
-    single { WebSocketRpcTransport(httpClient = get()) }
+    single<RpcTransport> { WebSocketRpcTransport(httpClient = get()) }
 }

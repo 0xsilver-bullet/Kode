@@ -15,15 +15,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 /**
- * Opens the environment's `/ws` socket and runs an RPC session over it.
+ * One attempt at an RPC session over some transport.
  *
- * T3 Code serves the RPC group with `RpcSerialization.layerJson`, so each
- * WebSocket text frame is exactly one JSON message and no additional framing is
- * needed. Binary frames are not part of this protocol and are ignored.
+ * The interface exists so the connection supervisor can be exercised against
+ * an in-memory transport; the app always uses [WebSocketRpcTransport].
  */
-class WebSocketRpcTransport(
-    private val httpClient: HttpClient,
-) {
+interface RpcTransport {
     /**
      * Connects to [socketUrl] and invokes [block] with a live connection.
      *
@@ -32,6 +29,22 @@ class WebSocketRpcTransport(
      * supervisor, matching `RpcSessionFactory` on the TypeScript side.
      */
     suspend fun <T> connect(
+        socketUrl: String,
+        block: suspend CoroutineScope.(RpcConnection) -> T,
+    ): T
+}
+
+/**
+ * Opens the environment's `/ws` socket and runs an RPC session over it.
+ *
+ * T3 Code serves the RPC group with `RpcSerialization.layerJson`, so each
+ * WebSocket text frame is exactly one JSON message and no additional framing is
+ * needed. Binary frames are not part of this protocol and are ignored.
+ */
+class WebSocketRpcTransport(
+    private val httpClient: HttpClient,
+) : RpcTransport {
+    override suspend fun <T> connect(
         socketUrl: String,
         block: suspend CoroutineScope.(RpcConnection) -> T,
     ): T = try {

@@ -19,9 +19,16 @@ Policy ported from `monitorConnectedLease`:
 - offline releases the session and waits, consuming no retry attempt and running no timer —
   surfaced as `ConnectionState.Offline`, which the UI must not render with a countdown;
 - a plain foreground **probes** the live session rather than replacing it, so a healthy socket
-  survives switching apps;
-- a foreground after `MEANINGFUL_SUSPENSION_MILLIS` (30s) **replaces** it, because the OS may have
-  killed it silently and probing would only wait for a timeout.
+  survives switching apps; the probe is bounded by the 3s mobile probe timeout;
+- a foreground after `MEANINGFUL_SUSPENSION_MILLIS` (10s, `MOBILE_BACKGROUND_RECONNECT_AFTER_MS`)
+  **replaces** it, because the OS may have killed it silently and probing would only wait for a
+  timeout. Sessions and attempts the supervisor drops on the user's behalf (resume, explicit retry,
+  failed wake probe) reconnect immediately with the ladder reset, and a resume also evicts the idle
+  HTTP connection pool on Android so the reconnect starts on fresh sockets like a cold launch;
+- wakeups that arrive while an attempt is establishing are consumed by the attempt
+  (`waitForEstablishmentInterrupt`): a resume-after-suspension restarts it, anything else is
+  swallowed — never left buffered to kill the fresh session the moment it connects;
+- the first call of a session (`server.getConfig`) is bounded by the 15s establishment timeout.
 
 `probe()` is capability-aware: `server.probe` only on servers advertising `connectionProbe`,
 otherwise `server.getConfig`, matching `RpcSessionFactory`.

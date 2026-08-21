@@ -14,6 +14,19 @@ import kotlinx.serialization.json.Json
  */
 expect fun createPlatformHttpClient(config: HttpClientConfig<*>.() -> Unit): HttpClient
 
+/**
+ * Closes every idle pooled keep-alive connection of the platform engine.
+ *
+ * A process that returns from a long background suspension may hold pooled
+ * connections whose far end silently died while the app was frozen — the
+ * kernel never saw a FIN, so reusing one stalls the next request until its
+ * timeout instead of failing fast. Evicting the pool makes a resume behave
+ * like a cold launch, which always starts on fresh sockets. Only *idle*
+ * connections are closed; in-flight requests and live WebSockets are
+ * untouched, so calling this is always safe.
+ */
+expect fun evictIdleHttpConnections()
+
 /** JSON policy for T3 Code contract payloads. */
 val ContractJson: Json = Json {
     ignoreUnknownKeys = true

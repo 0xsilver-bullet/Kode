@@ -36,7 +36,8 @@ class ConnectivityTest {
         // cheaper than reconnecting; above it, reconnecting is cheaper than
         // waiting for a probe to time out.
         assertTrue(MEANINGFUL_SUSPENSION_MILLIS > 0)
-        assertEquals(30_000L, MEANINGFUL_SUSPENSION_MILLIS)
+        // Matches MOBILE_BACKGROUND_RECONNECT_AFTER_MS in t3code.
+        assertEquals(10_000L, MEANINGFUL_SUSPENSION_MILLIS)
     }
 
     @Test
